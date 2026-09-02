@@ -1,0 +1,17 @@
+{
+  "mandatory_declarations": [
+    {"field": "manufacturer_name_address", "required": true, "min_font_mm": 1.5},
+    {"field": "net_quantity", "required": true, "min_font_mm": 2.0, "unit_required": true},
+    {"field": "mrp", "required": true, "format": "MRP Rs.XX inclusive of all taxes", "min_font_mm": 2.0},
+    {"field": "manufacture_date", "required": true, "format": "MM/YYYY"},
+    {"field": "consumer_care_details", "required": true},
+    {"field": "country_of_origin", "required_if": "imported"},
+    {"field": "unit_sale_price", "required_if": "applicable_category"}
+  ],
+  "font_size_rules_by_package_size": [
+    {"max_net_quantity_g": 50, "min_font_mm": 1},
+    {"max_net_quantity_g": 200, "min_font_mm": 1.5},
+    {"max_net_quantity_g": 1000, "min_font_mm": 2},
+    {"max_net_quantity_g": null, "min_font_mm": 4}
+  ]
+}

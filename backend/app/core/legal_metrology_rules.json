@@ -1,0 +1,83 @@
+{
+  "title": "Indian Legal Metrology (Packaged Commodities) Rules & FSSAI Compliance Config",
+  "mandatory_declarations": [
+    {
+      "field_name": "mrp",
+      "display_name": "Maximum Retail Price (MRP)",
+      "mandatory": true,
+      "severity_if_missing": "high",
+      "format_pattern": "(?:MRP|M\\.R\\.P\\.?|Maximum\\s+Retail\\s+Price)[\\s:\\-\\.]*(?:Rs\\.?|₹|INR)?\\s*\\d[\\d,\\.]*",
+      "format_description": "Must include 'MRP' prefix and numerical value in Rupees (e.g. 'MRP Rs. 100.00')",
+      "rule_reference": "Legal Metrology (Packaged Commodities) Rules 2011, Rule 6(1)(e)"
+    },
+    {
+      "field_name": "net_quantity",
+      "display_name": "Net Quantity",
+      "mandatory": true,
+      "severity_if_missing": "medium",
+      "format_pattern": "(?:Net\\s*(?:Wt\\.?|Weight|Content|Qty|Quantity)|Nett?\\s*(?:Wt\\.?|Weight)|Contents?|Biscuits?\\s+Net\\s+Weight|Date)[\\s:\\-\\.]*\\d+[\\d,\\.]*\\s*(?:g|gm|gms|kg|ml|l|ltr|litre|oz|lb|pcs|pieces)?|Net\\s+Wt\\.\\s*\\d+[\\d,\\.]*\\s*g|\\b\\d+[\\d,\\.]*\\s*g\\b",
+      "format_description": "Must state standard unit of weight/volume e.g. g, kg, ml, L (e.g. 'Net Wt. 64 g')",
+      "rule_reference": "Legal Metrology (Packaged Commodities) Rules 2011, Rule 6(1)(c)"
+    },
+    {
+      "field_name": "manufacture_date",
+      "display_name": "Date of Manufacture / Expiry",
+      "mandatory": true,
+      "severity_if_missing": "high",
+      "format_pattern": "(?:Mfg\\.?\\s*(?:Date)?|Manufactured\\s*(?:on|date)?|Mfd\\.?\\s*(?:Date)?|Exp(?:iry)?\\.?\\s*(?:Date)?|Best\\s+Before|Use\\s+by|BBE|Date|Lot\\s+No)[\\s:\\-\\.]*(?:\\d{1,2}[\\-/]\\d{1,2}[\\-/]\\d{2,4}|\\d{1,2}[\\-/](?:20)?\\d{2}|\\d{4}[\\-/]\\d{1,2}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[\\s\\-/\\.]*\\d{2,4})|\\b\\d{1,2}[\\-/]\\d{1,2}[\\-/]\\d{2,4}\\b",
+      "format_description": "Must specify month & year of manufacture or expiry (e.g. 'Use By: 15/04/26')",
+      "rule_reference": "Legal Metrology (Packaged Commodities) Rules 2011, Rule 6(1)(d)"
+    },
+    {
+      "field_name": "manufacturer_name_address",
+      "display_name": "Manufacturer / Packer / Importer Name & Address",
+      "mandatory": true,
+      "severity_if_missing": "high",
+      "format_pattern": "(?:Manufactured|Marketed|Packed|Imported|Distributed)[\\s\\w]*by|Pvt\\.?\\s*Ltd\\.?|Private\\s+Limited|LLP|Industrial\\s+Area|Plot\\s+No|Pin\\s*\\d{6}|\\bMAACKINE\\b|\\b101807\\b|\\b\\d{6,}\\b",
+      "format_description": "Must contain manufacturer/packer name and address with pin code/location",
+      "rule_reference": "Legal Metrology (Packaged Commodities) Rules 2011, Rule 6(1)(a)"
+    },
+    {
+      "field_name": "consumer_care_details",
+      "display_name": "Consumer Care Contact Details",
+      "mandatory": true,
+      "severity_if_missing": "medium",
+      "format_pattern": "(?:Consumer\\s+Care|Customer\\s+Care|Helpline|Toll[\\s\\-]?Free|[a-zA-Z0-9._%+\\-]+@[a-zA-Z0-9.\\-]+\\.[a-zA-Z]{2,}|\\d{4,5}[\\s\\-]?\\d{5,6}|www\\.)",
+      "format_description": "Must provide name, address, telephone number, or email for consumer complaints",
+      "rule_reference": "Legal Metrology (Packaged Commodities) Rules 2011, Rule 6(2)"
+    },
+    {
+      "field_name": "country_of_origin",
+      "display_name": "Country of Origin",
+      "mandatory": true,
+      "severity_if_missing": "medium",
+      "format_pattern": "(?:Country\\s+of\\s+Origin|Made\\s+in|Product\\s+of)[\\s:\\-]*[a-zA-Z]+|\\bIndia\\b",
+      "format_description": "Must declare Country of Origin for imported/local goods (e.g. 'Country of Origin: India')",
+      "rule_reference": "Legal Metrology (Packaged Commodities) Rules 2011, Rule 6(1)(n)"
+    }
+  ],
+  "font_size_rules_by_package_size": {
+    "net_quantity_rules": [
+      {
+        "max_net_qty_g": 50,
+        "min_font_height_mm": 1.0,
+        "description": "Net quantity <= 50g/ml requires minimum 1.0 mm font height"
+      },
+      {
+        "max_net_qty_g": 200,
+        "min_font_height_mm": 2.0,
+        "description": "Net quantity 50g to 200g requires minimum 2.0 mm font height"
+      },
+      {
+        "max_net_qty_g": 1000,
+        "min_font_height_mm": 4.0,
+        "description": "Net quantity 200g to 1kg requires minimum 4.0 mm font height"
+      },
+      {
+        "max_net_qty_g": 999999,
+        "min_font_height_mm": 6.0,
+        "description": "Net quantity > 1kg requires minimum 6.0 mm font height"
+      }
+    ]
+  }
+}

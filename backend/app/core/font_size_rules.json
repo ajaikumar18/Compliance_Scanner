@@ -1,0 +1,56 @@
+{
+  "description": "Legal Metrology (Packaged Commodities) Rules for minimum font height on product labels in India",
+  "net_quantity_rules": [
+    {
+      "min_net_quantity_g": 0,
+      "max_net_quantity_g": 50,
+      "min_font_height_mm": 1.5,
+      "description": "Net weight/volume up to 50g/ml"
+    },
+    {
+      "min_net_quantity_g": 50,
+      "max_net_quantity_g": 200,
+      "min_font_height_mm": 2.0,
+      "description": "Net weight/volume 50g to 200g/ml"
+    },
+    {
+      "min_net_quantity_g": 200,
+      "max_net_quantity_g": 1000,
+      "min_font_height_mm": 4.0,
+      "description": "Net weight/volume 200g to 1kg/L"
+    },
+    {
+      "min_net_quantity_g": 1000,
+      "max_net_quantity_g": null,
+      "min_font_height_mm": 6.0,
+      "description": "Net weight/volume exceeding 1kg/L"
+    }
+  ],
+  "general_declaration_rules": [
+    {
+      "min_panel_area_cm2": 0,
+      "max_panel_area_cm2": 100,
+      "min_font_height_mm": 1.0,
+      "description": "Principal display panel area up to 100 cm²"
+    },
+    {
+      "min_panel_area_cm2": 100,
+      "max_panel_area_cm2": 500,
+      "min_font_height_mm": 2.0,
+      "description": "Principal display panel area 100 to 500 cm²"
+    },
+    {
+      "min_panel_area_cm2": 500,
+      "max_panel_area_cm2": 2500,
+      "min_font_height_mm": 4.0,
+      "description": "Principal display panel area 500 to 2500 cm²"
+    },
+    {
+      "min_panel_area_cm2": 2500,
+      "max_panel_area_cm2": null,
+      "min_font_height_mm": 6.0,
+      "description": "Principal display panel area exceeding 2500 cm²"
+    }
+  ],
+  "default_min_font_height_mm": 2.0
+}
