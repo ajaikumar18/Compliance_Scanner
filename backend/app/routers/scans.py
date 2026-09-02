@@ -85,20 +85,22 @@ async def _process_single_scan_image(
         logger.warning("Preprocessing failed for %s: %s; using raw image", filename, exc)
         preprocessed = img_bgr
 
-    # Step 3: Fast Parallel OCR (Tesseract)
-    ocr_blocks = run_ocr(preprocessed, use_easyocr=False)
+    # Step 3: Fast Parallel OCR (Tesseract on both raw and preprocessed to avoid cropping text)
+    ocr_blocks = run_ocr(img_bgr, use_easyocr=False)
+    if preprocessed is not img_bgr:
+        ocr_blocks.extend(run_ocr(preprocessed, use_easyocr=False))
 
     # Step 4: Field Classification
     classification_res = classify_fields(ocr_blocks)
     classified = classification_res["classified"]
     unmatched = classification_res["unmatched"]
 
-    # Step 5: Fast 1-Pass Gemini Vision AI Fallback Merger
+    # Step 5: Fast Local-First OCR Merger (Instant local execution in < 1s)
     unified_extraction = merge_ocr_and_genai_results(
         image=preprocessed,
         classified_blocks=classified,
         unmatched_blocks=unmatched,
-        api_key=settings.GEMINI_API_KEY,
+        api_key=None,
     )
 
     # Step 6: Scale Calibration & Font Measurement

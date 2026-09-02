@@ -57,7 +57,7 @@ _RULES: list[dict] = [
     {
         "field": "mrp",
         "name": "mrp_explicit_with_val",
-        "pattern": re.compile(r"(?:MRP|M\.R\.P\.?|maximum\s+retail\s+price)[\s:\-\.]*(?:Rs\.?|₹|INR|\?)?[\s:\-\.]*\d+[\d,\.]*", re.IGNORECASE),
+        "pattern": re.compile(r"(?:MRP|M\.R\.P\.?|M[\.\s\w]*R[\.\s\w]*P|maximum\s+retail\s+price)[\s:\-\.=₹\?z&]*(?:Rs\.?|₹|INR|\?)?[\s:\-\.]*\d+[\d,\.]*", re.IGNORECASE),
         "confidence": 0.98,
     },
     {
@@ -103,14 +103,14 @@ _RULES: list[dict] = [
     {
         "field": "manufacture_date",
         "name": "mfg_date_explicit_with_val",
-        "pattern": re.compile(r"(?:mfg\.?\s*(?:date)?|manufactured|mfd\.?|pkd\.?|packed|best\s+before|exp(?:iry)?\.?|use\s+by|lot\s+no)[\s:\-]*\d{1,2}[\-/]\d{1,2}[\-/]\d{2,4}", re.IGNORECASE),
-        "confidence": 0.98,
+        "pattern": re.compile(r"(?:mfg\.?\s*(?:date)?|manufactured|mfd\.?|pkd\.?|packed)[\s:\-]*(\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{2,4}|\d{1,2}[\-/]\d{1,2}[\-/]\d{2,4})", re.IGNORECASE),
+        "confidence": 0.99,
     },
     {
         "field": "manufacture_date",
         "name": "date_format_val",
-        "pattern": re.compile(r"\b(?:\d{1,2}[\-/]\d{1,2}[\-/]\d{2,4}|\d{1,2}[\-/](?:20)?\d{2}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s\-/\.]*(?:20)?\d{2})\b", re.IGNORECASE),
-        "confidence": 0.88,
+        "pattern": re.compile(r"\b(?:\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{2,4}|\d{1,2}[\-/]\d{1,2}[\-/]\d{2,4}|\d{1,2}[\-/](?:20)?\d{2}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s\-/\.]*(?:20)?\d{2})\b", re.IGNORECASE),
+        "confidence": 0.70,
     },
     {
         "field": "manufacture_date",
@@ -164,25 +164,62 @@ _RULES: list[dict] = [
 
 
 def _clean_field_value(field: str, raw_text: str) -> str:
-    """Format and extract clean values for display."""
+    """Format and extract clean values for display using generic regex patterns."""
+    if not raw_text:
+        return ""
+
     if field == "mrp":
-        m = re.search(r"(?:MRP|M\.R\.P\.?|Rs\.?|₹|\?)[\s:\-\.]*(\d+[\d,\.]*)", raw_text, re.IGNORECASE)
+        m = re.search(r"(?:M\.?R\.?P\.?|MRP)[\s\:₹\?z&\.]*(\d+[\.\,]\d{2}|\d+)", raw_text, re.IGNORECASE)
         if m:
             return f"MRP Rs. {m.group(1)}"
+        m_num = re.search(r"\b(\d+[\.\,]\d{2})\b", raw_text)
+        if m_num:
+            return f"MRP Rs. {m_num.group(1)}"
+
     elif field == "net_quantity":
-        m = re.search(r"\b(\d+[\d,\.]*\s*(?:g|gm|gms|kg|ml|l|ltr|pcs|pack|units?|N))\b", raw_text, re.IGNORECASE)
+        m = re.search(r"\b(\d+[\d\.\,]*\s*(?:g|gm|gms|kg|ml|l|ltr|pcs|pack|units?|N))\b", raw_text, re.IGNORECASE)
         if m:
             return f"Net Wt. {m.group(1)}"
-        elif "NET WEIGHT" in raw_text.upper():
-            return "BISCUITS NET WEIGHT 64 g"
+
     elif field == "manufacture_date":
-        # Ignore HH:MM time codes like 07-11 or 07:11 (machine batch timestamp)
-        m_full = re.search(r"\b(\d{1,2}[\-/]\d{1,2}[\-/]\d{2,4}|\d{1,2}[\-/](?:20)?\d{2})\b", raw_text, re.IGNORECASE)
-        if m_full:
-            return f"Date: {m_full.group(1)}"
-        if re.search(r"\b\d{2}[:\-]\d{2}\b", raw_text) or "07-11" in raw_text or "07:11" in raw_text:
-            return "Date: 15/04/26"
-    return raw_text
+        # Prioritize explicit header e.g. MFG. DATE: 18 SEP 2026 or MFG: 16/10/25
+        m_exp = re.search(r"(?:MFG|MFG\.\s*DATE|PKD|PACKED)[\s\:]*(\d{1,2}\s+(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[A-Z]*\s+\d{2,4}|\d{1,2}[/\.-]\d{1,2}[/\.-]\d{2,4})", raw_text, re.IGNORECASE)
+        if m_exp:
+            return f"Date: {m_exp.group(1)}"
+        # Handle month name dates e.g. 18 SEP 2026 or 18-SEP-2026
+        m_month = re.search(r"\b(\d{1,2}\s+(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[A-Z]*\s+\d{2,4})\b", raw_text, re.IGNORECASE)
+        if m_month:
+            return f"Date: {m_month.group(1)}"
+        # Handle numeric dates DD/MM/YY or DD/MM/YYYY
+        dates = re.findall(r"\b\d{1,2}[\-/]\d{1,2}[\-/]\d{2,4}\b", raw_text)
+        if len(dates) >= 2:
+            return f"{dates[0]} (Mfg) / {dates[1]} (Use By) [Stacked under USE BY]"
+        elif len(dates) == 1:
+            return f"Date: {dates[0]}"
+
+    elif field == "manufacturer_name_address":
+        co_name = ""
+        m = re.search(r"(?:MANUFACTURED\s+(?:&\s+MARKETED\s+)?BY|MFG\s+BY|MARKETED\s+BY|PACKED\s+BY|IMPORTED\s+BY)[\s\:]*([^\n\r]*(?:Pvt\.?\s*Ltd\.?|Limited|LLP|Inc\.?)[^\n\r]*)", raw_text, re.IGNORECASE)
+        if m:
+            co_name = m.group(1).strip()
+        else:
+            m_co = re.search(r"\b([A-Z][A-Za-z0-9\s\,\.\-&]+\b(?:Pvt\.?\s*Ltd\.?|Private\s+Limited|LLP|Industries|Foods))\b", raw_text)
+            if m_co:
+                co_name = m_co.group(1).strip()
+
+        m_addr = re.search(r"(\d+[\w\s\,\.\-]+\b(?:Industrial|Area|Road|Street|Noida|Delhi|Mumbai|UP|PIN|\d{6})\b[^\n\r]*)", raw_text, re.IGNORECASE)
+        addr = m_addr.group(1).strip() if m_addr else ""
+
+        # Strip nutritional keywords if present
+        co_name = re.sub(r"(?:Energy|kcal|Protein|Fat|Sugar|Carbohydrates|Added)[^\.\,\d]*", "", co_name, flags=re.IGNORECASE).strip()
+        addr = re.sub(r"(?:Energy|kcal|Protein|Fat|Sugar|Carbohydrates|Added)[^\.\,\d]*", "", addr, flags=re.IGNORECASE).strip()
+
+        if addr and addr not in co_name:
+            res_str = f"{co_name} {addr}".strip()
+            return ' '.join(res_str.split())[:150]
+        return ' '.join((co_name or raw_text).split())[:150]
+
+    return raw_text.strip()
 
 
 def _score_text(text: str) -> tuple[str | None, float, str]:

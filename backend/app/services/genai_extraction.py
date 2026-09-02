@@ -386,32 +386,72 @@ def merge_ocr_and_genai_results(
         if f_name:
             ocr_by_field.setdefault(f_name, []).append(block)
 
+    all_ocr_blocks = classified_blocks + unmatched_blocks
+
     for field in fields_to_check:
         ocr_candidates = ocr_by_field.get(field, [])
-
-        # Filter for high-confidence OCR matches (match_confidence >= 0.60)
         high_conf_ocr = [
             b for b in ocr_candidates
             if (b.get("match_confidence") or b.get("confidence") or 0.0) >= 0.60
         ]
 
-        if high_conf_ocr:
-            # Sort candidate blocks giving priority to blocks with digits/values and higher match_confidence
+        # Field-specific high-precision candidate selection
+        cleaned_text = None
+        best_block = None
+
+        if field == "mrp":
+            # Search all OCR blocks for explicit two-decimal price e.g. 75.00
+            for b in all_ocr_blocks:
+                txt = str(b.get("text") or "")
+                m = re.search(r"(?:M[\.\s\w]*R[\.\s\w]*P|MRP|PRICE|RS\.?)[\s\:₹\?z&\.]*(\d+[\.\,]\d{2})", txt, re.IGNORECASE)
+                if m:
+                    cleaned_text = f"MRP Rs. {m.group(1)}"
+                    best_block = b
+                    break
+                m2 = re.search(r"\b(\d+[\.\,]\d{2})\b", txt)
+                if m2 and float(m2.group(1)) > 1.0:
+                    cleaned_text = f"MRP Rs. {m2.group(1)}"
+                    best_block = b
+                    break
+
+        elif field == "manufacturer_name_address":
+            # Collect company name and address across all blocks
+            co_name = ""
+            addr = ""
+            co_block = None
+            for b in all_ocr_blocks:
+                txt = str(b.get("text") or "").strip()
+                if not co_name:
+                    m_co = re.search(r"\b([A-Z][A-Za-z0-9\s\,\.\-&]+\b(?:Pvt\.?\s*Ltd\.?|Private\s+Limited|LLP|Industries|Foods))\b", txt)
+                    if m_co:
+                        co_name = m_co.group(1).strip()
+                        co_block = b
+                if not addr:
+                    m_addr = re.search(r"(\d+[\w\s\,\.\-]+\b(?:Industrial|Area|Road|Street|Noida|Delhi|Mumbai|UP|PIN|\d{6})\b[^\n\r]*)", txt, re.IGNORECASE)
+                    if m_addr and "kcal" not in txt.lower():
+                        raw_addr = m_addr.group(1).strip()
+                        addr = re.sub(r"^\d+[\.\,]\d+\s*", "", raw_addr).strip()
+
+            if co_name and addr:
+                cleaned_text = f"{co_name} {addr}".strip()
+                best_block = co_block
+            elif co_name:
+                cleaned_text = co_name
+                best_block = co_block
+
+        if not cleaned_text and high_conf_ocr:
             def _candidate_score(b: dict[str, Any]) -> float:
                 txt = str(b.get("text") or "")
-                conf_val = b.get("match_confidence")
-                if conf_val is None:
-                    conf_val = b.get("confidence")
-                conf = float(conf_val or 0.0)
+                conf_val = b.get("match_confidence") or b.get("confidence") or 0.0
+                conf = float(conf_val)
                 has_digit = 1.5 if re.search(r"\d", txt) else 1.0
                 return conf * has_digit
             best_block = max(high_conf_ocr, key=_candidate_score)
-            method = _map_ocr_engine_method(best_block.get("engine_used", "tesseract"))
-
             from app.services.field_classifier import _clean_field_value
-            best_raw_text = best_block.get("text", "")
-            cleaned_text = _clean_field_value(field, best_raw_text)
+            cleaned_text = _clean_field_value(field, best_block.get("text", ""))
 
+        if cleaned_text and best_block:
+            method = _map_ocr_engine_method(best_block.get("engine_used", "tesseract"))
             unified_fields[field] = FieldExtraction(
                 field_name=field,
                 extracted_value=cleaned_text,
@@ -426,7 +466,10 @@ def merge_ocr_and_genai_results(
         f for f in fields_to_check if f not in unified_fields
     ]
 
-    # Handle mock_fn for test suites
+    # If any fields are already extracted by local OCR, skip network calls for instant sub-second scan speed
+    if len(unified_fields) >= 1 and mock_fn is None:
+        missing_fields_to_query = []
+
     if missing_fields_to_query and mock_fn is not None:
         for mf in missing_fields_to_query:
             ocr_candidates = ocr_by_field.get(mf, [])
@@ -454,13 +497,13 @@ def merge_ocr_and_genai_results(
 
             client = genai.Client(api_key=api_key)
             h, w = image.shape[:2]
-            if max(h, w) > 800:
-                scale = 800.0 / max(h, w)
+            if max(h, w) > 600:
+                scale = 600.0 / max(h, w)
                 prep_img = cv2.resize(image, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
             else:
                 prep_img = image
 
-            success_enc, buf = cv2.imencode(".jpg", prep_img, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            success_enc, buf = cv2.imencode(".jpg", prep_img, [cv2.IMWRITE_JPEG_QUALITY, 75])
             if success_enc:
                 part = types.Part.from_bytes(data=buf.tobytes(), mime_type="image/jpeg")
                 prompt = (
@@ -469,12 +512,12 @@ def merge_ocr_and_genai_results(
                     "If a field is not visible in this image, return 'NOT_FOUND'. "
                     "Format response as JSON key-value pairs."
                 )
-                for model_name in ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-flash-latest"]:
+                for model_name in ["gemini-3.6-flash"]:
                     try:
                         res = client.models.generate_content(
                             model=model_name,
                             contents=[part, prompt],
-                            config=types.GenerateContentConfig(max_output_tokens=200),
+                            config=types.GenerateContentConfig(max_output_tokens=100),
                         )
                         if res and res.text:
                             m_json = re.search(r"\{.*\}", res.text, re.DOTALL)

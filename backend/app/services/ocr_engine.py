@@ -159,12 +159,14 @@ def _run_tesseract(image: np.ndarray) -> list[OcrBlock]:
 
     blocks: list[OcrBlock] = []
     n = len(data["text"])
+    lines_dict: dict[tuple[int, int], dict[str, Any]] = {}
+
     for i in range(n):
         raw_text: str = data["text"][i].strip()
         if not raw_text:
             continue
         conf_raw = int(data["conf"][i])
-        if conf_raw < 0:          # -1 means no confidence info
+        if conf_raw < 0:
             conf_raw = 0
         confidence = conf_raw / 100.0
         if confidence < MIN_CONFIDENCE:
@@ -178,16 +180,44 @@ def _run_tesseract(image: np.ndarray) -> list[OcrBlock]:
         if w <= 0 or h <= 0:
             continue
 
+        b_num = data.get("block_num", [0]*n)[i]
+        l_num = data.get("line_num", [0]*n)[i]
+        key = (b_num, l_num)
+
+        if key not in lines_dict:
+            lines_dict[key] = {
+                "words": [raw_text],
+                "left": x,
+                "top": y,
+                "right": x + w,
+                "bottom": y + h,
+                "confs": [confidence],
+            }
+        else:
+            lines_dict[key]["words"].append(raw_text)
+            lines_dict[key]["right"] = max(lines_dict[key]["right"], x + w)
+            lines_dict[key]["bottom"] = max(lines_dict[key]["bottom"], y + h)
+            lines_dict[key]["confs"].append(confidence)
+
+    for key, line_info in lines_dict.items():
+        line_text = " ".join(line_info["words"]).strip()
+        if not line_text:
+            continue
+        avg_conf = sum(line_info["confs"]) / len(line_info["confs"])
+        bx = line_info["left"]
+        by = line_info["top"]
+        bw = line_info["right"] - line_info["left"]
+        bh = line_info["bottom"] - line_info["top"]
         blocks.append(
             OcrBlock(
-                text=raw_text,
-                bbox=[x, y, w, h],
-                confidence=round(confidence, 4),
+                text=line_text,
+                bbox=[bx, by, bw, bh],
+                confidence=round(avg_conf, 4),
                 engine_used="tesseract",
             )
         )
 
-    logger.debug("Tesseract: %d blocks extracted", len(blocks))
+    logger.debug("Tesseract: %d line blocks extracted", len(blocks))
     return blocks
 
 
