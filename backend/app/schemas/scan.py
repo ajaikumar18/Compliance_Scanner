@@ -13,6 +13,8 @@ class ScanBase(BaseModel):
     product_id: int
     scan_type: ScanType = ScanType.manual
     raw_image_url: str | None = Field(default=None, examples=["https://storage.example.com/raw.png"])
+    gtin: str | None = Field(default=None, examples=["8901030383456"])
+    batch_code: str | None = Field(default=None, examples=["B4208"])
 
 
 class ScanCreate(ScanBase):

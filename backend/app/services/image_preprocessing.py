@@ -168,7 +168,7 @@ def detect_and_correct_skew(image: np.ndarray) -> np.ndarray:
 
     logger.debug("detect_and_correct_skew: detected skew = %.2f deg", skew_angle)
 
-    if abs(skew_angle) < 0.5:
+    if abs(skew_angle) < 2.0:
         return image
 
     # Sign convention: cv2.getRotationMatrix2D positive angle = CCW.
@@ -331,18 +331,31 @@ def preprocess_pipeline(image: np.ndarray) -> np.ndarray:
 
     logger.info("preprocess_pipeline: starting on shape=%s", image.shape)
 
-    # Downscale oversized images (max dimension > 1600px) for high-performance OCR
+    # Resolution normalization for OCR speed/accuracy balance:
+    # 1. Downscale oversized images (> 2500px) to prevent memory bottlenecks.
+    # 2. Upscale truly low-res images (< 800px) so tiny packaging fonts are readable.
+    #    Images 800px–2500px are already at a good resolution; no resizing needed.
     h, w = image.shape[:2]
     max_dim = max(h, w)
-    if max_dim > 1600:
-        scale = 1600.0 / max_dim
+    if max_dim > 2500:
+        scale = 2500.0 / max_dim
         new_w, new_h = int(w * scale), int(h * scale)
         image = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
-        logger.info("preprocess_pipeline: resized shape (%d, %d) -> (%d, %d)", h, w, new_h, new_w)
+        logger.info("preprocess_pipeline: downscaled shape (%d, %d) -> (%d, %d)", h, w, new_h, new_w)
+    elif max_dim < 800 and max_dim >= 100:
+        scale = min(1600.0 / max_dim, 2.5)
+        new_w, new_h = int(w * scale), int(h * scale)
+        image = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
+        logger.info("preprocess_pipeline: upscaled shape (%d, %d) -> (%d, %d) for OCR legibility", h, w, new_h, new_w)
+    else:
+        logger.info("preprocess_pipeline: no resize needed for shape (%d, %d)", h, w)
 
     step1 = detect_and_correct_skew(image)
-    step2 = correct_perspective(step1)
-    step3 = enhance_contrast(step2)
+    # NOTE: correct_perspective() is intentionally skipped in the default pipeline.
+    # It frequently misdetects quadrilaterals and crops text off the image.
+    # Gemini Vision AI handles perspective distortion natively.
+    # Call correct_perspective() explicitly only when needed.
+    step2 = enhance_contrast(step1)
 
-    logger.info("preprocess_pipeline: complete -> shape=%s", step3.shape)
-    return step3
+    logger.info("preprocess_pipeline: complete -> shape=%s", step2.shape)
+    return step2

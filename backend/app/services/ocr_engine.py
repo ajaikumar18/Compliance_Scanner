@@ -184,8 +184,20 @@ def _run_tesseract(image: np.ndarray) -> list[OcrBlock]:
         l_num = data.get("line_num", [0]*n)[i]
         key = (b_num, l_num)
 
-        if key not in lines_dict:
-            lines_dict[key] = {
+        # Find the active segment for this line (split if large horizontal gap)
+        active_key = key
+        # Check if a segment for this line already exists and has a wide column gap
+        matching_keys = [k for k in lines_dict if k[0] == b_num and k[1] == l_num]
+        if matching_keys:
+            latest_key = matching_keys[-1]
+            last_right = lines_dict[latest_key]["right"]
+            gap = x - last_right
+            if gap > max(h * 2.5, 45):
+                # New column detected on the same line -> create a new segment
+                active_key = (b_num, l_num, len(matching_keys))
+
+        if active_key not in lines_dict:
+            lines_dict[active_key] = {
                 "words": [raw_text],
                 "left": x,
                 "top": y,
@@ -194,10 +206,10 @@ def _run_tesseract(image: np.ndarray) -> list[OcrBlock]:
                 "confs": [confidence],
             }
         else:
-            lines_dict[key]["words"].append(raw_text)
-            lines_dict[key]["right"] = max(lines_dict[key]["right"], x + w)
-            lines_dict[key]["bottom"] = max(lines_dict[key]["bottom"], y + h)
-            lines_dict[key]["confs"].append(confidence)
+            lines_dict[active_key]["words"].append(raw_text)
+            lines_dict[active_key]["right"] = max(lines_dict[active_key]["right"], x + w)
+            lines_dict[active_key]["bottom"] = max(lines_dict[active_key]["bottom"], y + h)
+            lines_dict[active_key]["confs"].append(confidence)
 
     for key, line_info in lines_dict.items():
         line_text = " ".join(line_info["words"]).strip()

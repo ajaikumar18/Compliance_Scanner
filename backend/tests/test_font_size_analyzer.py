@@ -78,8 +78,34 @@ class TestCalibrateScale:
         res = calibrate_scale(img)
 
         assert res["calibration_method"] == "uncalibrated_default_dpi"
+        assert res["calibration_tier"] == "dpi_estimated"
         assert res["pixels_per_mm"] > 0
         assert "uncalibrated" in res["tolerance_note"].lower()
+
+    def test_ar_verified_takes_highest_priority(self):
+        # Even with circle image and manual package width, AR verified must take top precedence
+        img = _make_circle_image(width=500, height=500, radius=50)
+        res = calibrate_scale(
+            img,
+            reference_object_diameter_mm=25.0,
+            package_width_mm=120.0,
+            ar_pixels_per_mm=6.45,
+        )
+
+        assert res["calibration_method"] == "ar_verified"
+        assert res["calibration_tier"] == "ar_verified"
+        assert res["pixels_per_mm"] == 6.45
+        assert "+/-0.05mm" in res["tolerance_note"]
+        assert res["detected_circle"] is None
+
+    def test_ar_mm_per_pixel_conversion(self):
+        img = _make_blank_image(width=400, height=400)
+        res = calibrate_scale(img, ar_mm_per_pixel=0.1)
+
+        assert res["calibration_method"] == "ar_verified"
+        assert res["calibration_tier"] == "ar_verified"
+        assert res["pixels_per_mm"] == 10.0
+        assert "+/-0.05mm" in res["tolerance_note"]
 
     def test_raises_on_empty_image(self):
         with pytest.raises(ValueError, match="empty or None"):
@@ -159,6 +185,16 @@ class TestCheckFontCompliance:
         assert "tolerance" in res["tolerance_note"].lower()
         assert "2.50mm" in res["tolerance_note"]
         assert "2.0mm" in res["tolerance_note"]
+
+    def test_check_font_compliance_ar_verified(self):
+        res = check_font_compliance(
+            "mrp",
+            measured_height_mm=2.5,
+            calibration_method="ar_verified",
+        )
+        assert res["compliant"] is True
+        assert "+/-0.05mm" in res["tolerance_note"]
+        assert "ar verification" in res["tolerance_note"].lower()
 
 
 # ─────────────────────────────────────────────────────────────────────────────

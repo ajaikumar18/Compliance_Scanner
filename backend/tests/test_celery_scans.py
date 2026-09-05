@@ -166,3 +166,57 @@ class TestAsyncBatchEndpoints:
         json_res = response.json()
         assert json_res["status"] == "failed"
         assert "Download error" in json_res["error"]
+
+    @patch("app.routers.scans.process_scan_batch.delay")
+    def test_queue_batch_scan_local_fallback_when_celery_offline(self, mock_delay):
+        """When Celery/Redis connection fails, endpoint must seamlessly run locally without error."""
+        mock_delay.side_effect = ConnectionError("Error 10061 connecting to localhost:6379")
+
+        payload = {
+            "image_urls": ["http://example.com/item1.jpg"],
+            "scan_type": "ecommerce",
+            "category": "Snacks",
+        }
+
+        response = client.post("/scan/batch/queue", json=payload)
+        assert response.status_code == 200
+        json_res = response.json()
+        assert json_res["status"] == "queued"
+        assert json_res["batch_id"].startswith("batch_")
+        assert json_res["total_images"] == 1
+
+        # Check status endpoint retrieves the local job
+        status_resp = client.get(f"/scan/batch/{json_res['batch_id']}/status")
+        assert status_resp.status_code == 200
+        status_data = status_resp.json()
+        assert status_data["batch_id"] == json_res["batch_id"]
+        assert status_data["status"] in ("queued", "processing", "completed")
+
+    def test_list_recent_scans_endpoint(self):
+        """GET /scans and GET /scan/history must return recent scans from DB or memory."""
+        from app.routers.scans import RECENT_SCANS
+        RECENT_SCANS.append({
+            "scan_id": 999,
+            "product_name": "Test Product",
+            "product_category": "Snacks",
+            "compliance_status": "compliant",
+            "violations_count": 0,
+            "violations": [],
+            "fields": {},
+        })
+        response = client.get("/scans")
+        assert response.status_code == 200
+        data = response.json()
+        assert "scans" in data
+        assert "total" in data
+        assert isinstance(data["scans"], list)
+        assert data["total"] >= 1
+
+        alias_resp = client.get("/scan/history")
+        assert alias_resp.status_code == 200
+        alias_data = alias_resp.json()
+        assert "scans" in alias_data
+        assert alias_data["total"] >= 1
+
+
+

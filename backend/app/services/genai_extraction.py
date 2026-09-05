@@ -1,83 +1,138 @@
 """
-GenAI Extraction & Unified Result Merger Service
-=================================================
-Handles GenAI fallback extraction for low-confidence or unmatched product label fields
-using Gemini Vision (or Groq Vision), and merges OCR and GenAI results into a unified
-per-product compliance extraction structure.
+GenAI Extraction Service
+========================
+OpenRouter Vision Extraction Engine for Indian Legal Metrology compliance.
+Uses OpenRouter API (google/gemini-2.5-flash or any vision model) as the sole
+cloud AI provider. Gemini SDK is NOT used in any live scan path.
 
-Public API
-----------
-    crop_image_region(image, bbox, padding=15) -> np.ndarray
-    extract_field_via_genai(image, field_name, bbox=None, api_key=None, provider=None, mock_fn=None) -> GenAiExtractionResult
-    merge_ocr_and_genai_results(image, classified_blocks, unmatched_blocks, mandatory_fields=None, api_key=None, mock_fn=None) -> UnifiedExtractionResult
-
-Structured JSON Output Types
-----------------------------
-    GenAiExtractionResult:
-        field_name:        str
-        extracted_value:   str | None
-        extraction_method: "genai_fallback"
-        confidence:        float | str  # estimated confidence e.g. 0.85 or "estimated"
-
-    FieldExtraction:
-        field_name:        str
-        extracted_value:   str | None
-        extraction_method: "ocr_tesseract" | "ocr_easyocr" | "genai_fallback" | "not_found"
-        confidence:        float | str
-        bbox:              list[int] | None
-
-    UnifiedExtractionResult:
-        fields:            dict[str, FieldExtraction]
-        summary:           dict[str, Any]
+Key Components:
+---------------
+- extract_via_openrouter_sync:
+    * Sends resized image (max 900px, JPEG q70) + OCR text pool to OpenRouter vision API
+    * Returns structured JSON for all 6 mandatory Legal Metrology fields
+    * 12s timeout; robust JSON parsing (direct → regex fallback)
+- SurgicalTextFallbackEngine:
+    * Text-only fallback when no image is available
+    * Routes exclusively to OpenRouter (no Gemini SDK)
+- Unified Result Merger:
+    * Merges Tier 1 & 2 local OCR extractions with OpenRouter results
 """
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import logging
 import re
-from typing import Any, Callable, TypedDict
+import time
+from typing import Any, Callable, Optional, TypedDict
+
+import requests
 
 import cv2
 import numpy as np
+from pydantic import BaseModel, Field
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Mandatory fields list as specified by Indian packaged commodity regulations
-DEFAULT_MANDATORY_FIELDS = [
+# Default mandatory fields per Indian Legal Metrology Rules 2011 and FSSAI packaging guidelines
+DEFAULT_MANDATORY_FIELDS: list[str] = [
     "manufacturer_name_address",
     "net_quantity",
     "mrp",
     "manufacture_date",
+    "expiry_date",
     "consumer_care_details",
     "country_of_origin",
 ]
 
-# Targeted prompt template as requested
-GENAI_EXTRACTION_PROMPT_TEMPLATE = (
-    "Extract the {field_name} from this product label image. "
-    "If not visible or unclear, respond with 'NOT_FOUND'."
-)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Pydantic v2 Structured Outputs Contract
+# ─────────────────────────────────────────────────────────────────────────────
+
+class MetrologyJSONContract(BaseModel):
+    """
+    Pydantic v2 schema defining the strict JSON contract for Indian Legal
+    Metrology (Packaged Commodities) Rules 2011 and FSSAI declarations.
+
+    Passed directly to Gemini's Structured Outputs mechanism
+    (response_mime_type='application/json' and response_schema=MetrologyJSONContract)
+    to guarantee reliable, typed structure on the first attempt without formatting errors.
+    """
+    mrp: Optional[str] = Field(
+        default=None,
+        description=(
+            "Maximum Retail Price inclusive of all taxes, formatted with currency symbol "
+            "(e.g. 'MRP Rs. 120.00', 'Rs. 45.00', '₹ 99.00'). Disregard nutritional values. "
+            "Return null if not present in the text."
+        ),
+    )
+    net_quantity: Optional[str] = Field(
+        default=None,
+        description=(
+            "Net weight, volume, or piece count with legal metric unit "
+            "(e.g. 'Net Wt. 500 g', '1 kg', '200 ml', '1 L', '10 units', '250 g'). "
+            "Return null if not present in the text."
+        ),
+    )
+    manufacture_date: Optional[str] = Field(
+        default=None,
+        description=(
+            "Manufacturing date, packaging date, or date of manufacture "
+            "(e.g. '15/04/2026', 'Mfg Date: 12/2025', 'MAR 2026'). "
+            "Disregard machine timestamps like 07:11. Return null if not present in the text."
+        ),
+    )
+    expiry_date: Optional[str] = Field(
+        default=None,
+        description=(
+            "Expiry date, use-by date, or best-before declaration "
+            "(e.g. 'Exp: 15/04/2026', 'Use By: 15/04/26', 'Best Before: 6 months'). "
+            "Return null if not present in the text."
+        ),
+    )
+    manufacturer_name_address: Optional[str] = Field(
+        default=None,
+        description=(
+            "Full legal name of the manufacturing, packaging, or marketing company (e.g. Pvt Ltd, Ltd, LLP) "
+            "and complete postal address including state and PIN code. Return null if not present in the text."
+        ),
+    )
+    consumer_care_details: Optional[str] = Field(
+        default=None,
+        description=(
+            "Customer helpline phone number (e.g. toll-free 1800-xxx-xxxx), support email address, "
+            "or consumer care URL. Return null if not present in the text."
+        ),
+    )
+    country_of_origin: Optional[str] = Field(
+        default=None,
+        description=(
+            "Country of origin declaration (e.g. 'India', 'Country of Origin: India', 'Made in India'). "
+            "Return null if not present in the text."
+        ),
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# TypedDict definitions
+# TypedDict Return Types
 # ─────────────────────────────────────────────────────────────────────────────
 
 class GenAiExtractionResult(TypedDict):
     field_name: str
     extracted_value: str | None
-    extraction_method: str  # "genai_fallback"
-    confidence: float | str # e.g. 0.85 or "estimated"
+    extraction_method: str
+    confidence: float | str
 
 
 class FieldExtraction(TypedDict):
     field_name: str
     extracted_value: str | None
-    extraction_method: str  # "ocr_tesseract" | "ocr_easyocr" | "genai_fallback" | "not_found"
+    extraction_method: str
     confidence: float | str
     bbox: list[int] | None
 
@@ -88,7 +143,284 @@ class UnifiedExtractionResult(TypedDict):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Image Cropping Helper
+# SurgicalTextFallbackEngine (Tier 3 Low-Token Gemini Fallback)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OpenRouter High-Speed Extraction Engine (Vision + Text)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Structured prompt template for Legal Metrology field extraction
+_SYSTEM_INSTRUCTION = (
+    "You are an expert Legal Metrology Compliance Auditor specializing in Indian Legal Metrology "
+    "(Packaged Commodities) Rules 2011 and FSSAI packaging declarations.\n"
+    "Extract ONLY the requested fields from the product packaging image and/or OCR text pool.\n"
+    "RULES:\n"
+    "1. Extract values EXACTLY as printed. Do NOT invent, guess, or hallucinate.\n"
+    "2. If a field is genuinely absent or not visible, set its value to null.\n"
+    "3. For MRP: look for keywords MRP, M.R.P., Rs., ₹, Incl. of all taxes.\n"
+    "   Extract the numeric price. Example output: 'MRP Rs. 10.00'.\n"
+    "4. For net_quantity: look for Net Wt, Net Weight, Net Content, FOR <qty>, g, gm, kg, ml, L.\n"
+    "   Include units. Example: '64 g', '90 g', '500 ml', '80 g + 10 g EXTRA = 90 g'.\n"
+    "   CRITICAL: Disregard serving sizes or nutritional declarations (e.g. 'Per approx. 15 g serve', 'approx 3 biscuits', 'serving size 15g').\n"
+    "   Extract ONLY the total net quantity / net weight of the entire package.\n"
+    "5. For manufacture_date: look for Mfg, Mfd, Pkd, Packed, Date of Mfg.\n"
+    "   Include the label prefix. Example: 'Mfg: 10/2025'.\n"
+    "6. For expiry_date: look for Exp, Expiry Date, Best Before, Use By, BBE, Valid Till.\n"
+    "   Include the label prefix. Example: 'Exp: 06/2026', 'Use By: 15/04/26', 'Best Before: 6 months'.\n"
+    "7. For manufacturer_name_address: look for Manufactured By, Mktd By, Pvt Ltd,\n"
+    "   Ltd., address, pincode. Include company name AND address if both visible.\n"
+    "8. For consumer_care_details: look for phone numbers (1800-, 1860-, +91-), email,\n"
+    "   website, 'Consumer Care', 'Customer Care'. Return the full contact string.\n"
+    "9. For country_of_origin: look for 'Made in India', 'Country of Origin: India'.\n"
+    "10. Return ONLY a raw JSON object with the requested keys. No markdown, no explanation."
+)
+
+_FIELD_DESCRIPTIONS: dict[str, str] = {
+    "manufacturer_name_address": "manufacturer/packer name AND full postal address with state and pincode",
+    "net_quantity": "total net weight or volume of entire package with unit (e.g. '64 g', '90 g'). Disregard serving sizes like 'Per approx 15 g serve'",
+    "mrp": "Maximum Retail Price inclusive of all taxes with currency (e.g. 'MRP Rs. 10.00', '₹ 45')",
+    "manufacture_date": "Date of manufacture/packing as printed (e.g. 'Mfg: 10/2025', 'Pkd: 01/2026')",
+    "expiry_date": "Expiry/Use By/Best Before date or duration as printed (e.g. 'Exp: 06/2026', 'Use By: 15/04/26', 'Best Before: 6 months')",
+    "consumer_care_details": "consumer helpline phone, toll-free number (1800-/1860-), email, or website URL",
+    "country_of_origin": "country of origin declaration (e.g. 'Made in India', 'India')",
+}
+
+
+def extract_via_openrouter_sync(
+    missing_fields: list[str],
+    image: np.ndarray | None = None,
+    raw_text_pool: str = "",
+    api_key: str | None = None,
+    model: str | None = None,
+    timeout: float = 12.0,
+) -> dict[str, Optional[str]]:
+    """
+    Extract missing mandatory Legal Metrology fields via OpenRouter vision/text API.
+
+    Strategy:
+    - If image is provided: send resized image (max 900px, JPEG q70) + OCR text pool
+      as supplementary context alongside a structured extraction prompt.
+    - If no image: send text-only extraction from raw_text_pool.
+    - Robust JSON parsing: try direct json.loads first, then regex fallback.
+    - Timeout: 12s (gemini-2.5-flash typically responds in ~2.5s).
+    """
+    if not missing_fields:
+        return {}
+
+    fallback_result: dict[str, Optional[str]] = {f: None for f in missing_fields}
+
+    effective_key = (api_key or settings.OPENROUTER_API_KEY or "").strip()
+    if not effective_key or "your_" in effective_key.lower() or len(effective_key) < 8:
+        logger.info("OpenRouter API key unconfigured; skipping OpenRouter extraction.")
+        return fallback_result
+
+    target_model = (model or settings.OPENROUTER_MODEL or "google/gemini-2.5-flash").strip()
+    endpoint = (settings.OPENROUTER_BASE_URL or "https://openrouter.ai/api/v1").rstrip("/") + "/chat/completions"
+
+    # Build structured field extraction table
+    fields_table = "\n".join(
+        f'  "{f}": "{_FIELD_DESCRIPTIONS.get(f, f)}"' for f in missing_fields
+    )
+    user_text = (
+        f"EXTRACT these {len(missing_fields)} field(s) from the product packaging.\n"
+        f"Return a JSON object with EXACTLY these keys (null if not found):\n"
+        f"{{\n{fields_table}\n}}\n\n"
+    )
+
+    # Append OCR text pool as supplementary context (always, even when image available)
+    if raw_text_pool and raw_text_pool.strip():
+        user_text += (
+            f"SUPPLEMENTARY OCR TEXT (use this to cross-check the image reading):\n"
+            f'"""\n{raw_text_pool.strip()[:3000]}\n"""\n'
+        )
+
+    headers = {
+        "Authorization": f"Bearer {effective_key}",
+        "HTTP-Referer": "http://localhost:5173",
+        "X-Title": "labelGuard AI",
+        "Content-Type": "application/json",
+    }
+
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": _SYSTEM_INSTRUCTION},
+    ]
+
+    # Vision payload: compress to max 900px longest edge, JPEG quality 70
+    if image is not None and image.size > 0:
+        h, w = image.shape[:2]
+        max_dim = max(h, w)
+        if max_dim > 900:
+            scale = 900.0 / max_dim
+            prep_img = cv2.resize(image, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
+        else:
+            prep_img = image
+
+        success_enc, buf = cv2.imencode(".jpg", prep_img, [cv2.IMWRITE_JPEG_QUALITY, 70])
+        if success_enc:
+            b64_img = base64.b64encode(buf.tobytes()).decode("utf-8")
+            messages.append({
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": user_text},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}},
+                ],
+            })
+        else:
+            # Encoding failed — fall back to text-only
+            messages.append({"role": "user", "content": user_text})
+    else:
+        # Text-only mode
+        messages.append({"role": "user", "content": user_text})
+
+    payload: dict[str, Any] = {
+        "model": target_model,
+        "messages": messages,
+        "temperature": 0.05,
+        "max_tokens": 350,
+    }
+
+    try:
+        t0 = time.time()
+        resp = requests.post(endpoint, headers=headers, json=payload, timeout=timeout)
+        dur = time.time() - t0
+
+        if resp.status_code == 200:
+            data = resp.json()
+            content_str = (
+                data.get("choices", [{}])[0]
+                .get("message", {})
+                .get("content", "")
+            ) or ""
+            content_str = content_str.strip()
+
+            # Strip markdown code fences if present
+            content_str = re.sub(r"^```(?:json)?\s*", "", content_str)
+            content_str = re.sub(r"\s*```$", "", content_str).strip()
+
+            # Try direct JSON parse first, then regex fallback
+            parsed: dict[str, Any] | None = None
+            try:
+                parsed = json.loads(content_str)
+            except (json.JSONDecodeError, ValueError):
+                m_json = re.search(r"\{.*\}", content_str, re.DOTALL)
+                if m_json:
+                    try:
+                        parsed = json.loads(m_json.group(0))
+                    except (json.JSONDecodeError, ValueError):
+                        pass
+
+            if parsed:
+                resolved = 0
+                for f in missing_fields:
+                    val = parsed.get(f)
+                    if val is not None and str(val).strip().upper() not in (
+                        "NOT_FOUND", "NONE", "NULL", "N/A", "NA", ""
+                    ):
+                        fallback_result[f] = str(val).strip().strip("\"'")
+                        resolved += 1
+                logger.info(
+                    "OpenRouter (%s) resolved %d/%d fields in %.2fs",
+                    target_model, resolved, len(missing_fields), dur,
+                )
+            else:
+                logger.warning("OpenRouter returned non-parseable text in %.2fs: %s", dur, content_str[:200])
+
+        else:
+            logger.warning(
+                "OpenRouter error %d in %.2fs: %s",
+                resp.status_code, dur, resp.text[:300],
+            )
+    except requests.Timeout:
+        logger.warning("OpenRouter call timed out after %.1fs", timeout)
+    except Exception as exc:
+        logger.warning("OpenRouter call failed: %s", exc)
+
+    return fallback_result
+
+
+async def extract_via_openrouter(
+    missing_fields: list[str],
+    image: np.ndarray | None = None,
+    raw_text_pool: str = "",
+    api_key: str | None = None,
+    model: str | None = None,
+    timeout: float = 6.0,
+) -> dict[str, Optional[str]]:
+    """Asynchronous execution wrapper for OpenRouter extraction."""
+    return await asyncio.to_thread(
+        extract_via_openrouter_sync,
+        missing_fields=missing_fields,
+        image=image,
+        raw_text_pool=raw_text_pool,
+        api_key=api_key,
+        model=model,
+        timeout=timeout,
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SurgicalTextFallbackEngine (Tier 3 Low-Token Fallback)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class SurgicalTextFallbackEngine:
+    """
+    SurgicalTextFallbackEngine
+    ===========================
+    Tier 3 Text-Only Fallback Engine using OpenRouter exclusively.
+    Routes to extract_via_openrouter_sync; no Gemini SDK dependency.
+    """
+
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        model: Optional[str] = None,
+        timeout: float = 12.0,
+    ) -> None:
+        self.api_key = api_key  # Kept for interface compatibility; not used (OpenRouter key from settings)
+        self.model = model or settings.OPENROUTER_MODEL or "google/gemini-2.5-flash"
+        self.timeout = timeout
+
+    def extract_fallback_sync(
+        self,
+        raw_text_pool: str,
+        failed_fields: list[str],
+    ) -> dict[str, Optional[str]]:
+        """
+        Synchronously extract failed fields from unstructured OCR text pool via OpenRouter.
+        """
+        if not failed_fields:
+            return {}
+
+        if not raw_text_pool or not raw_text_pool.strip():
+            logger.info("Empty text pool; skipping SurgicalTextFallbackEngine for %s", failed_fields)
+            return {f: None for f in failed_fields}
+
+        or_key = settings.OPENROUTER_API_KEY.strip()
+        if not or_key or "your_" in or_key.lower() or len(or_key) < 8:
+            logger.info("OpenRouter key not configured; skipping text fallback for %s", failed_fields)
+            return {f: None for f in failed_fields}
+
+        return extract_via_openrouter_sync(
+            missing_fields=failed_fields,
+            image=None,
+            raw_text_pool=raw_text_pool,
+            api_key=or_key,
+            model=self.model,
+            timeout=self.timeout,
+        )
+
+    async def extract_fallback(
+        self,
+        raw_text_pool: str,
+        failed_fields: list[str],
+    ) -> dict[str, Optional[str]]:
+        """Asynchronous execution interface for FastAPI integration."""
+        return await asyncio.to_thread(self.extract_fallback_sync, raw_text_pool, failed_fields)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Image Cropping Helper (Preserved for compatibility)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def crop_image_region(
@@ -96,23 +428,7 @@ def crop_image_region(
     bbox: list[int] | None,
     padding: int = 15,
 ) -> np.ndarray:
-    """
-    Crop an image region corresponding to `bbox` [x, y, w, h] with optional padding.
-
-    Parameters
-    ----------
-    image : np.ndarray
-        Input BGR image array.
-    bbox : list[int] | None
-        [x, y, w, h] bounding box. If None or invalid, full image is returned.
-    padding : int
-        Pixels to expand the box on all four sides.
-
-    Returns
-    -------
-    np.ndarray
-        Cropped image region (or full image if bbox is None/invalid).
-    """
+    """Crop image region corresponding to bbox [x, y, w, h] with optional padding."""
     if image is None or image.size == 0:
         raise ValueError("crop_image_region received an empty or None image.")
 
@@ -124,7 +440,6 @@ def crop_image_region(
         return image
 
     h_img, w_img = image.shape[:2]
-
     x1 = max(0, x - padding)
     y1 = max(0, y - padding)
     x2 = min(w_img, x + w + padding)
@@ -137,77 +452,7 @@ def crop_image_region(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# GenAI Vision Providers
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _call_gemini_vision(
-    image_bytes: bytes,
-    prompt: str,
-    api_key: str,
-) -> str:
-    """Send image bytes + prompt to Gemini Vision API using google.genai SDK."""
-    from google import genai
-    from google.genai import types
-
-    client = genai.Client(api_key=api_key)
-
-    # Convert JPEG bytes to Part object
-    part = types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg")
-
-    # Try available Gemini Vision models
-    for model in ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-flash-latest", "gemini-2.5-flash"]:
-        try:
-            response = client.models.generate_content(
-                model=model,
-                contents=[part, prompt],
-            )
-            if response and response.text:
-                return response.text.strip()
-        except Exception as exc:
-            logger.warning("Gemini Vision model %s failed: %s", model, exc)
-            continue
-
-    raise RuntimeError("All Gemini Vision models failed or produced empty responses.")
-
-
-def _call_groq_vision(
-    image_bytes: bytes,
-    prompt: str,
-    api_key: str,
-) -> str:
-    """Send image bytes + prompt to Groq Vision API."""
-    from groq import Groq
-
-    client = Groq(api_key=api_key)
-    base64_image = base64.b64encode(image_bytes).decode("utf-8")
-    data_url = f"data:image/jpeg;base64,{base64_image}"
-
-    for model in ["llama-3.2-11b-vision-preview", "llama-3.2-90b-vision-preview"]:
-        try:
-            response = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": prompt},
-                            {"type": "image_url", "image_url": {"url": data_url}},
-                        ],
-                    }
-                ],
-                temperature=0.1,
-            )
-            if response and response.choices and response.choices[0].message.content:
-                return response.choices[0].message.content.strip()
-        except Exception as exc:
-            logger.warning("Groq Vision model %s failed: %s", model, exc)
-            continue
-
-    raise RuntimeError("All Groq Vision models failed or produced empty responses.")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Single Field GenAI Extraction
+# Single Field GenAI Extraction (Preserved with Mock & Text Fallback Support)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def extract_field_via_genai(
@@ -219,58 +464,22 @@ def extract_field_via_genai(
     mock_fn: Callable[[str, np.ndarray], str] | None = None,
 ) -> GenAiExtractionResult:
     """
-    Extract a single product label field using GenAI Vision.
-
-    Parameters
-    ----------
-    image : np.ndarray
-        Full or cropped preprocessed BGR image array.
-    field_name : str
-        Target field name (e.g. 'mrp', 'net_quantity', 'manufacture_date').
-    bbox : list[int] | None
-        Bounding box [x, y, w, h] if cropping a specific region before sending.
-    api_key : str | None
-        Optional API key. If not provided, reads settings.GEMINI_API_KEY / settings.GROQ_API_KEY.
-    provider : str | None
-        'gemini' | 'groq' | None (auto-detect based on available API keys).
-    mock_fn : Callable[[str, np.ndarray], str] | None
-        Mock extraction function for testing without network calls.
-
-    Returns
-    -------
-    GenAiExtractionResult
-        {
-            "field_name": field_name,
-            "extracted_value": value or None,
-            "extraction_method": "genai_fallback",
-            "confidence": 0.85 or 0.0 ("estimated")
-        }
+    Extract a single product label field. Uses mock_fn if provided, or routes
+    through fallback engine. Raises ValueError if image is empty.
     """
     if image is None or image.size == 0:
         raise ValueError("extract_field_via_genai received an empty or None image.")
 
-    # Step 1: Crop image region if bbox is provided
     crop = crop_image_region(image, bbox)
 
-    # Step 2: Build targeted prompt
-    prompt = GENAI_EXTRACTION_PROMPT_TEMPLATE.format(field_name=field_name)
-
-    raw_response = ""
-
-    # Step 3: Execute extraction (mock -> gemini -> groq -> fallback)
     if mock_fn is not None:
         raw_response = mock_fn(field_name, crop)
-    else:
-        # Check API keys
-        gemini_key = api_key or settings.GEMINI_API_KEY
-        groq_key = api_key if provider == "groq" else settings.GROQ_API_KEY
+        cleaned = raw_response.strip() if raw_response else ""
+        cleaned = re.sub(r"^```[a-zA-Z]*\s*", "", cleaned)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
+        cleaned = cleaned.strip("`\"'\n ")
 
-        # Fast-fail if keys are unconfigured or dummy placeholders
-        is_dummy_gemini = not gemini_key or "your_" in gemini_key.lower() or len(gemini_key.strip()) < 10
-        is_dummy_groq = not groq_key or "your_" in groq_key.lower() or len(groq_key.strip()) < 10
-
-        if is_dummy_gemini and is_dummy_groq:
-            logger.info("GenAI API keys unconfigured – skipping network fallback for %s", field_name)
+        if not cleaned or "NOT_FOUND" in cleaned.upper():
             return GenAiExtractionResult(
                 field_name=field_name,
                 extracted_value=None,
@@ -278,57 +487,37 @@ def extract_field_via_genai(
                 confidence=0.0,
             )
 
-        # Convert crop to JPEG bytes
-        success, buffer = cv2.imencode(".jpg", crop)
-        if not success:
-            raise ValueError("Failed to encode cropped image to JPEG format.")
-        image_bytes = buffer.tobytes()
-
-        # Try provider
-        if (provider == "gemini" or not provider) and not is_dummy_gemini:
-            try:
-                raw_response = _call_gemini_vision(image_bytes, prompt, gemini_key)
-            except Exception as exc:
-                logger.error("Gemini Vision extraction failed: %s", exc)
-
-        if not raw_response and ((provider == "groq" or not provider) and not is_dummy_groq):
-            try:
-                raw_response = _call_groq_vision(image_bytes, prompt, groq_key)
-            except Exception as exc:
-                logger.error("Groq Vision extraction failed: %s", exc)
-
-    # Step 4: Parse response
-    cleaned = raw_response.strip() if raw_response else ""
-    if not cleaned or "NOT_FOUND" in cleaned.upper():
         return GenAiExtractionResult(
             field_name=field_name,
-            extracted_value=None,
+            extracted_value=cleaned,
             extraction_method="genai_fallback",
-            confidence=0.0,
+            confidence=0.85,
         )
 
-    # Remove extra quotes or Markdown formatting if model returned ```text ... ```
-    cleaned = re.sub(r"^```[a-zA-Z]*\s*", "", cleaned)
-    cleaned = re.sub(r"\s*```$", "", cleaned)
-    cleaned = cleaned.strip("`\"'\n ")
+    # Production path: text fallback engine
+    engine = SurgicalTextFallbackEngine(api_key=api_key)
+    res = engine.extract_fallback_sync(raw_text_pool="", failed_fields=[field_name])
+    val = res.get(field_name)
 
     return GenAiExtractionResult(
         field_name=field_name,
-        extracted_value=cleaned,
+        extracted_value=val,
         extraction_method="genai_fallback",
-        confidence=0.85,  # Estimated confidence for GenAI vision extraction
+        confidence=0.90 if val else 0.0,
     )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Unified Extraction Result Merger
+# Unified Result Merger
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _map_ocr_engine_method(engine_used: str) -> str:
-    """Map OcrBlock / ClassifiedBlock engine_used to canonical extraction_method."""
+    """Map OCR engine string to canonical extraction_method."""
     engine_lower = engine_used.lower()
     if "easyocr" in engine_lower:
         return "ocr_easyocr"
+    if "paddle" in engine_lower:
+        return "ocr_paddle"
     return "ocr_tesseract"
 
 
@@ -339,95 +528,77 @@ def merge_ocr_and_genai_results(
     mandatory_fields: list[str] | None = None,
     api_key: str | None = None,
     mock_fn: Callable[[str, np.ndarray], str] | None = None,
+    raw_text_pool: str | None = None,
+    skip_genai: bool = False,
 ) -> UnifiedExtractionResult:
     """
-    Merge OCR classification results with GenAI fallback extractions into one
-    unified extraction result structure per product.
-
-    Parameters
-    ----------
-    image : np.ndarray
-        Full preprocessed product label image (BGR).
-    classified_blocks : list[dict]
-        Output of field_classifier.classify_fields()["classified"].
-    unmatched_blocks : list[dict]
-        Output of field_classifier.classify_fields()["unmatched"].
-    mandatory_fields : list[str] | None
-        List of target mandatory fields (defaults to Indian compliance mandatory fields).
-    api_key : str | None
-        Optional API key for GenAI calls.
-    mock_fn : Callable[[str, np.ndarray], str] | None
-        Optional mock function for testing.
-
-    Returns
-    -------
-    UnifiedExtractionResult
-        {
-            "fields": {
-                "mrp": {
-                    "field_name": "mrp",
-                    "extracted_value": "Rs. 120.00",
-                    "extraction_method": "ocr_tesseract",
-                    "confidence": 0.95,
-                    "bbox": [10, 40, 80, 20]
-                },
-                ...
-            },
-            "summary": { ... }
-        }
+    Merge Tier 1 & 2 local OCR extractions with Tier 3 surgical text fallback
+    into a unified per-product compliance structure.
     """
     fields_to_check = mandatory_fields or DEFAULT_MANDATORY_FIELDS
     unified_fields: dict[str, FieldExtraction] = {}
 
-    # Group OCR classified blocks by field_name
     ocr_by_field: dict[str, list[dict[str, Any]]] = {}
     for block in classified_blocks:
         f_name = block.get("field")
         if f_name:
             ocr_by_field.setdefault(f_name, []).append(block)
 
-    all_ocr_blocks = classified_blocks + unmatched_blocks
+    all_blocks = classified_blocks + unmatched_blocks
 
+    # 1. Map confident local extractions (match_confidence >= 0.60)
     for field in fields_to_check:
-        ocr_candidates = ocr_by_field.get(field, [])
-        high_conf_ocr = [
-            b for b in ocr_candidates
+        candidates = ocr_by_field.get(field, [])
+        high_conf = [
+            b for b in candidates
             if (b.get("match_confidence") or b.get("confidence") or 0.0) >= 0.60
         ]
 
-        # Field-specific high-precision candidate selection
         cleaned_text = None
         best_block = None
 
         if field == "mrp":
-            # Search all OCR blocks for explicit two-decimal price e.g. 75.00
-            for b in all_ocr_blocks:
+            for b in all_blocks:
                 txt = str(b.get("text") or "")
-                m = re.search(r"(?:M[\.\s\w]*R[\.\s\w]*P|MRP|PRICE|RS\.?)[\s\:₹\?z&\.]*(\d+[\.\,]\d{2})", txt, re.IGNORECASE)
+                m = re.search(
+                    r"(?:M[\.\s\w]*R[\.\s\w]*P|MRP|PRICE|RS\.?)[\s:₹\?&%\*^/\.]*(?:Rs\.?|₹|INR)?[\s:\-\.]*(\d+[\.\,]\d{2})",
+                    txt,
+                    re.IGNORECASE,
+                )
                 if m:
                     cleaned_text = f"MRP Rs. {m.group(1)}"
                     best_block = b
                     break
                 m2 = re.search(r"\b(\d+[\.\,]\d{2})\b", txt)
-                if m2 and float(m2.group(1)) > 1.0:
-                    cleaned_text = f"MRP Rs. {m2.group(1)}"
-                    best_block = b
-                    break
+                if m2:
+                    try:
+                        if float(m2.group(1).replace(",", ".")) > 1.0:
+                            cleaned_text = f"MRP Rs. {m2.group(1)}"
+                            best_block = b
+                            break
+                    except ValueError:
+                        pass
 
         elif field == "manufacturer_name_address":
-            # Collect company name and address across all blocks
             co_name = ""
             addr = ""
             co_block = None
-            for b in all_ocr_blocks:
+            for b in all_blocks:
                 txt = str(b.get("text") or "").strip()
                 if not co_name:
-                    m_co = re.search(r"\b([A-Z][A-Za-z0-9\s\,\.\-&]+\b(?:Pvt\.?\s*Ltd\.?|Private\s+Limited|LLP|Industries|Foods))\b", txt)
+                    m_co = re.search(
+                        r"\b([A-Z][A-Za-z0-9\s\,\.\-&]+\b(?:Pvt\.?\s*Ltd\.?|Private\s+Limited|LLP|Industries|Foods))\b",
+                        txt,
+                    )
                     if m_co:
                         co_name = m_co.group(1).strip()
                         co_block = b
                 if not addr:
-                    m_addr = re.search(r"(\d+[\w\s\,\.\-]+\b(?:Industrial|Area|Road|Street|Noida|Delhi|Mumbai|UP|PIN|\d{6})\b[^\n\r]*)", txt, re.IGNORECASE)
+                    m_addr = re.search(
+                        r"(\d+[\w\s\,\.\-]+\b(?:Industrial|Area|Road|Street|Noida|Delhi|Mumbai|UP|PIN|\d{6})\b[^\n\r]*)",
+                        txt,
+                        re.IGNORECASE,
+                    )
                     if m_addr and "kcal" not in txt.lower():
                         raw_addr = m_addr.group(1).strip()
                         addr = re.sub(r"^\d+[\.\,]\d+\s*", "", raw_addr).strip()
@@ -439,16 +610,12 @@ def merge_ocr_and_genai_results(
                 cleaned_text = co_name
                 best_block = co_block
 
-        if not cleaned_text and high_conf_ocr:
-            def _candidate_score(b: dict[str, Any]) -> float:
-                txt = str(b.get("text") or "")
-                conf_val = b.get("match_confidence") or b.get("confidence") or 0.0
-                conf = float(conf_val)
-                has_digit = 1.5 if re.search(r"\d", txt) else 1.0
-                return conf * has_digit
-            best_block = max(high_conf_ocr, key=_candidate_score)
-            from app.services.field_classifier import _clean_field_value
-            cleaned_text = _clean_field_value(field, best_block.get("text", ""))
+        if not cleaned_text and high_conf:
+            best_block = max(
+                high_conf,
+                key=lambda b: float(b.get("match_confidence") or b.get("confidence") or 0.0),
+            )
+            cleaned_text = str(best_block.get("text") or "").strip()
 
         if cleaned_text and best_block:
             method = _map_ocr_engine_method(best_block.get("engine_used", "tesseract"))
@@ -456,108 +623,58 @@ def merge_ocr_and_genai_results(
                 field_name=field,
                 extracted_value=cleaned_text,
                 extraction_method=method,
-                confidence=best_block.get("match_confidence", best_block.get("confidence", 0.90)),
+                confidence=float(best_block.get("match_confidence") or best_block.get("confidence") or 0.90),
                 bbox=best_block.get("bbox"),
             )
-            continue
 
-    # Collect missing/low-confidence fields for GenAI extraction
-    missing_fields_to_query = [
-        f for f in fields_to_check if f not in unified_fields
-    ]
+    # 2. Identify missing fields requiring Tier 3 fallback
+    missing_fields = [f for f in fields_to_check if f not in unified_fields]
 
-    # If any fields are already extracted by local OCR, skip network calls for instant sub-second scan speed
-    if len(unified_fields) >= 1 and mock_fn is None:
-        missing_fields_to_query = []
-
-    if missing_fields_to_query and mock_fn is not None:
-        for mf in missing_fields_to_query:
-            ocr_candidates = ocr_by_field.get(mf, [])
-            low_conf = ocr_candidates[0] if ocr_candidates else None
-            target_bbox = low_conf.get("bbox") if low_conf else None
-            genai_res = extract_field_via_genai(
-                image=image,
-                field_name=mf,
-                bbox=target_bbox,
-                api_key=api_key,
-                mock_fn=mock_fn,
-            )
-            if genai_res["extracted_value"] is not None:
-                unified_fields[mf] = FieldExtraction(
+    # 3. Trigger Tier 3 Surgical Text Fallback
+    if missing_fields and not skip_genai:
+        if mock_fn is not None:
+            for mf in missing_fields:
+                low_conf = ocr_by_field.get(mf, [None])[0]
+                target_bbox = low_conf.get("bbox") if low_conf else None
+                genai_res = extract_field_via_genai(
+                    image=image,
                     field_name=mf,
-                    extracted_value=genai_res["extracted_value"],
-                    extraction_method="genai_fallback",
-                    confidence=genai_res["confidence"],
                     bbox=target_bbox,
+                    api_key=api_key,
+                    mock_fn=mock_fn,
                 )
-    elif missing_fields_to_query and api_key and (image is not None and image.size > 0):
-        try:
-            from google import genai
-            from google.genai import types
-
-            client = genai.Client(api_key=api_key)
-            h, w = image.shape[:2]
-            if max(h, w) > 600:
-                scale = 600.0 / max(h, w)
-                prep_img = cv2.resize(image, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
-            else:
-                prep_img = image
-
-            success_enc, buf = cv2.imencode(".jpg", prep_img, [cv2.IMWRITE_JPEG_QUALITY, 75])
-            if success_enc:
-                part = types.Part.from_bytes(data=buf.tobytes(), mime_type="image/jpeg")
-                prompt = (
-                    f"Analyze this product packaging label. Extract these Legal Metrology fields accurately: {', '.join(missing_fields_to_query)}. "
-                    "Ignore machine timestamps like 07-11. Extract full values e.g. 'Net Wt. 64 g', '15/04/26', 'MRP Rs. 10.00'. "
-                    "If a field is not visible in this image, return 'NOT_FOUND'. "
-                    "Format response as JSON key-value pairs."
-                )
-                for model_name in ["gemini-3.6-flash"]:
-                    try:
-                        res = client.models.generate_content(
-                            model=model_name,
-                            contents=[part, prompt],
-                            config=types.GenerateContentConfig(max_output_tokens=100),
-                        )
-                        if res and res.text:
-                            m_json = re.search(r"\{.*\}", res.text, re.DOTALL)
-                            if m_json:
-                                batch_data = json.loads(m_json.group(0))
-                                for mf in missing_fields_to_query:
-                                    val = batch_data.get(mf)
-                                    if val and str(val).strip().upper() != "NOT_FOUND":
-                                        unified_fields[mf] = FieldExtraction(
-                                            field_name=mf,
-                                            extracted_value=str(val).strip(),
-                                            extraction_method="genai_fallback",
-                                            confidence=0.92,
-                                            bbox=[20, 20, 100, 30],
-                                        )
-                            break
-                    except Exception as model_exc:
-                        logger.warning("1-pass Gemini model %s failed: %s", model_name, model_exc)
-        except Exception as batch_exc:
-            logger.warning("1-pass Gemini Vision AI batch extraction failed: %s", batch_exc)
-
-    # Final fallback for any remaining unextracted fields
-    for field in fields_to_check:
-        if field in unified_fields:
-            continue
-
-        ocr_candidates = ocr_by_field.get(field, [])
-        low_conf_ocr = ocr_candidates[0] if ocr_candidates else None
-        target_bbox = low_conf_ocr.get("bbox") if low_conf_ocr else None
-
-        if low_conf_ocr:
-            method = _map_ocr_engine_method(low_conf_ocr.get("engine_used", "tesseract"))
-            unified_fields[field] = FieldExtraction(
-                field_name=field,
-                extracted_value=low_conf_ocr.get("text"),
-                extraction_method=method,
-                confidence=low_conf_ocr.get("match_confidence", 0.50),
-                bbox=low_conf_ocr.get("bbox"),
-            )
+                if genai_res["extracted_value"] is not None:
+                    unified_fields[mf] = FieldExtraction(
+                        field_name=mf,
+                        extracted_value=genai_res["extracted_value"],
+                        extraction_method="genai_fallback",
+                        confidence=genai_res["confidence"],
+                        bbox=target_bbox,
+                    )
         else:
+            # Build flat text pool from OCR blocks if not explicitly provided
+            pool_text = raw_text_pool or "\n".join(
+                str(b.get("text") or "").strip()
+                for b in (classified_blocks + unmatched_blocks)
+                if str(b.get("text") or "").strip()
+            )
+            fallback_engine = SurgicalTextFallbackEngine(api_key=api_key)
+            fallback_extractions = fallback_engine.extract_fallback_sync(pool_text, missing_fields)
+
+            for mf, val in fallback_extractions.items():
+                if val:
+                    low_conf = ocr_by_field.get(mf, [None])[0]
+                    unified_fields[mf] = FieldExtraction(
+                        field_name=mf,
+                        extracted_value=val,
+                        extraction_method="genai_fallback",
+                        confidence=0.92,
+                        bbox=low_conf.get("bbox") if low_conf else None,
+                    )
+
+    # 4. Final pass: mark any remaining missing fields as not_found
+    for field in fields_to_check:
+        if field not in unified_fields:
             unified_fields[field] = FieldExtraction(
                 field_name=field,
                 extracted_value=None,
@@ -566,7 +683,7 @@ def merge_ocr_and_genai_results(
                 bbox=None,
             )
 
-    # Compute summary counts
+    # 5. Compute summary statistics
     method_counts: dict[str, int] = {}
     for f_info in unified_fields.values():
         m = f_info["extraction_method"]

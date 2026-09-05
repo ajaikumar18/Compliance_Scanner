@@ -66,9 +66,18 @@ DEFAULT_LEGAL_RULES = {
             "display_name": "Date of Manufacture / Expiry",
             "mandatory": True,
             "severity_if_missing": "high",
-            "format_pattern": r"(?:Mfg\.?\s*(?:Date)?|Manufactured\s*(?:on|date)?|Mfd\.?\s*(?:Date)?|Exp(?:iry)?\.?\s*(?:Date)?|Best\s+Before|Use\s+by|BBE|Date|Lot\s+No)[\s:\-\.]*(?:\d{1,2}[\-/]\d{1,2}[\-/]\d{2,4}|\d{1,2}[\-/](?:20)?\d{2}|\d{4}[\-/]\d{1,2}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[\s\-/\.]*\d{2,4})|\b\d{1,2}[\-/]\d{1,2}[\-/]\d{2,4}\b",
+            "format_pattern": r"(?:Mfg\.?\s*(?:Date)?|Manufactured\s*(?:on|date)?|Mfd\.?\s*(?:Date)?|PKD\.?|PACKED|Exp(?:iry)?\.?\s*(?:Date)?|Best\s+Before|Use\s+by|BBE|Date|Lot\s+No)[\s:\-\.]*(?:\d{1,2}[\-/]\d{1,2}[\-/]\d{2,4}|\d{1,2}[\-/](?:20)?\d{2}|\d{4}[\-/]\d{1,2}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[\s\-/\.]*\d{2,4})|\b\d{1,2}[\-/]\d{1,2}[\-/]\d{2,4}\b",
             "format_description": "Must specify month & year of manufacture or expiry (e.g. 'Use By: 15/04/26')",
             "rule_reference": "Legal Metrology Rules 2011, Rule 6(1)(d)",
+        },
+        {
+            "field_name": "expiry_date",
+            "display_name": "Date of Expiry / Best Before",
+            "mandatory": False,
+            "severity_if_missing": "low",
+            "format_pattern": r"(?:Exp(?:iry)?\.?\s*(?:Date)?|Best\s+Before|Use\s+by|BBE|Valid\s*(?:till|upto))[\s:\-\.]*(?:\d{1,2}[\-/]\d{1,2}[\-/]\d{2,4}|\d{1,2}[\-/](?:20)?\d{2}|\d{4}[\-/]\d{1,2}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[\s\-/\.]*\d{2,4}|\d+\s*(?:months?|days?|years?)[^\n\r]{0,40})|\b\d{1,2}[\-/]\d{1,2}[\-/]\d{2,4}\b",
+            "format_description": "Must specify valid expiry date, use-by date, or best-before duration (e.g. 'Exp: 15/04/26')",
+            "rule_reference": "Legal Metrology Rules 2011, Rule 6(1)(d) & FSSAI Guidelines",
         },
         {
             "field_name": "manufacturer_name_address",
@@ -208,7 +217,7 @@ def evaluate_compliance(
         conf = field_info.get("confidence", 0.0)
         bbox = field_info.get("bbox")
 
-        if method == "genai_fallback":
+        if method in ("genai_fallback", "genai_primary", "genai_targeted"):
             has_genai_fallback = True
         if isinstance(conf, (int, float)) and conf < 0.70:
             has_low_confidence = True
@@ -222,8 +231,23 @@ def evaluate_compliance(
             "violations": [],
         }
 
+        # Fallback between manufacture_date and expiry_date for Rule 6(1)(d)
+        if f_name == "manufacture_date" and (not extracted_val or not str(extracted_val).strip()):
+            exp_info = extracted_fields.get("expiry_date", {})
+            if exp_info.get("extracted_value"):
+                extracted_val = exp_info.get("extracted_value")
+                method = exp_info.get("extraction_method", method)
+                conf = exp_info.get("confidence", conf)
+                bbox = exp_info.get("bbox", bbox)
+
         # ── 1. Presence Check ─────────────────────────────────────────────────
         if not extracted_val or not str(extracted_val).strip():
+            if not rule.get("mandatory", True):
+                # Non-mandatory field absent (e.g. expiry date on non-perishable goods)
+                check_record["present"] = False
+                field_checks[f_name] = check_record
+                continue
+
             v_item = ViolationItem(
                 field_name=f_name,
                 violation_type="missing",

@@ -36,11 +36,15 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
 
     # ── AI ────────────────────────────────────────────────────────────────────
-    GEMINI_API_KEY: str = ""
+    GEMINI_API_KEY: str = ""          # Optional; not used in live scan path (OpenRouter is primary)
     GROQ_API_KEY: str = ""
+    OPENROUTER_API_KEY: str = ""
+    OPENROUTER_MODEL: str = "google/gemini-2.5-flash"
+    OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
+    OPENROUTER_TIMEOUT: float = 12.0  # Seconds; gemini-2.5-flash averages ~2.5s
 
     # ── App ───────────────────────────────────────────────────────────────────
-    APP_NAME: str = "Compliance Scanner"
+    APP_NAME: str = "labelGuard AI"
     APP_VERSION: str = "0.1.0"
     DEBUG: bool = False
 

@@ -1,14 +1,16 @@
 import React, { useState } from 'react';
-import { UploadCloud, FolderUp, Globe, FileImage, CheckCircle, Loader2, Play } from 'lucide-react';
+import { UploadCloud, FolderUp, Globe, FileImage, CheckCircle, Loader2, Play, Smartphone, Sparkles } from 'lucide-react';
 import { queueEcommerceCategoryScan, uploadBatchFiles, uploadSingleScan } from '../services/api';
+import { ARMobileCaptureModal } from '../components/ARMobileCaptureModal';
 import type { ScanResult } from '../types';
 
 interface UploadPageProps {
   onScanCompleted: (result: ScanResult) => void;
   onBatchQueued: (batchId: string) => void;
+  onBatchCompleted?: (results: ScanResult[]) => void;
 }
 
-export const UploadPage = ({ onScanCompleted, onBatchQueued }: UploadPageProps) => {
+export const UploadPage = ({ onScanCompleted, onBatchQueued, onBatchCompleted }: UploadPageProps) => {
   const [activeTab, setActiveTab] = useState<'single' | 'batch' | 'ecommerce'>('single');
 
   // Single Upload State
@@ -18,6 +20,11 @@ export const UploadPage = ({ onScanCompleted, onBatchQueued }: UploadPageProps) 
   const [packageWidthMm, setPackageWidthMm] = useState<string>('');
   const [netQuantityG, setNetQuantityG] = useState<string>('');
   const [loadingSingle, setLoadingSingle] = useState(false);
+
+  // AR Mobile Calibration State
+  const [isARModalOpen, setIsARModalOpen] = useState(false);
+  const [arPixelsPerMm, setArPixelsPerMm] = useState<number | undefined>(undefined);
+  const [arCalibrationTier, setArCalibrationTier] = useState<string | undefined>(undefined);
 
   // Batch Upload State
   const [batchFiles, setBatchFiles] = useState<File[]>([]);
@@ -36,9 +43,27 @@ export const UploadPage = ({ onScanCompleted, onBatchQueued }: UploadPageProps) 
   const handleSingleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
+      // Clear stale state from previous upload
+      setError(null);
+      setSuccessMsg(null);
+      // Revoke previous ObjectURL to prevent memory leaks
+      if (singlePreview) {
+        URL.revokeObjectURL(singlePreview);
+      }
       setSingleFile(file);
       setSinglePreview(URL.createObjectURL(file));
     }
+  };
+
+  const handleARCapture = (file: File, calibratedPxPerMm: number, tier: string) => {
+    if (singlePreview) {
+      URL.revokeObjectURL(singlePreview);
+    }
+    setSingleFile(file);
+    setSinglePreview(URL.createObjectURL(file));
+    setArPixelsPerMm(calibratedPxPerMm);
+    setArCalibrationTier(tier);
+    setSuccessMsg(`AR Calibrated: ${calibratedPxPerMm.toFixed(2)} px/mm (${tier === 'ar_verified' ? 'WebXR AR' : 'Optical Caliper'})`);
   };
 
   const handleSingleSubmit = async (e: React.FormEvent) => {
@@ -52,7 +77,11 @@ export const UploadPage = ({ onScanCompleted, onBatchQueued }: UploadPageProps) 
         category,
         packageWidthMm: packageWidthMm ? parseFloat(packageWidthMm) : undefined,
         netQuantityG: netQuantityG ? parseFloat(netQuantityG) : undefined,
+        arPixelsPerMm: arPixelsPerMm,
       });
+      if (singlePreview) {
+        res.scanned_image_url = singlePreview;
+      }
       onScanCompleted(res);
     } catch (err: any) {
       setError(err.message || 'Failed to scan image.');
@@ -79,7 +108,11 @@ export const UploadPage = ({ onScanCompleted, onBatchQueued }: UploadPageProps) 
       const results = await uploadBatchFiles(batchFiles, batchCategory);
       if (results && results.length > 0) {
         setSuccessMsg(`Successfully processed ${results.length} product scans!`);
-        onScanCompleted(results[0]);
+        if (onBatchCompleted) {
+          onBatchCompleted(results);
+        } else {
+          onScanCompleted(results[0]);
+        }
       }
     } catch (err: any) {
       setError(err.message || 'Batch upload failed.');
@@ -107,72 +140,110 @@ export const UploadPage = ({ onScanCompleted, onBatchQueued }: UploadPageProps) 
   };
 
   return (
-    <div className="max-w-4xl mx-auto py-8 px-4">
-      <div className="mb-8 text-center">
-        <h1 className="text-3xl font-bold text-white tracking-tight">Product Label Compliance Scanner</h1>
-        <p className="text-slate-400 mt-2 text-sm max-w-xl mx-auto">
-          Upload product images or scrape e-commerce categories to perform instant Legal Metrology & FSSAI compliance verification.
+    <div className="max-w-4xl mx-auto py-8 px-4 space-y-6">
+      <div className="text-center space-y-2">
+        <span className="text-[10px] font-mono uppercase px-2.5 py-0.5 bg-[#1C2B3A] text-white font-bold tracking-widest">
+          STATUTORY COMPLIANCE FILING SYSTEM
+        </span>
+        <h1 className="text-3xl font-serif font-bold text-[#1C2B3A] tracking-tight">
+          Product Label Evidence Submission
+        </h1>
+        <p className="text-[#5A6E82] text-xs max-w-xl mx-auto leading-relaxed">
+          Upload packaging specimens or scrape e-commerce catalogs for immediate Legal Metrology & FSSAI statutory declaration auditing.
         </p>
       </div>
 
-      {/* Mode Navigation Tabs */}
-      <div className="flex justify-center mb-8">
-        <div className="inline-flex p-1.5 glass-panel rounded-2xl border border-slate-800">
+      {/* Mode Navigation Tabs styled as dossier file tabs */}
+      <div className="flex justify-center">
+        <div className="inline-flex p-1 bg-white border border-[#D8D2C6]">
           <button
             onClick={() => setActiveTab('single')}
-            className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all ${
+            className={`flex items-center gap-2 px-5 py-2 text-xs font-semibold tracking-wide transition-all ${
               activeTab === 'single'
-                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'bg-[#1C2B3A] text-white'
+                : 'text-[#5A6E82] hover:text-[#1C2B3A] hover:bg-[#F7F5F0]'
             }`}
           >
             <UploadCloud className="w-4 h-4" />
-            Single Label Scan
+            Single Specimen Scan
           </button>
 
           <button
             onClick={() => setActiveTab('batch')}
-            className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all ${
+            className={`flex items-center gap-2 px-5 py-2 text-xs font-semibold tracking-wide transition-all ${
               activeTab === 'batch'
-                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'bg-[#1C2B3A] text-white'
+                : 'text-[#5A6E82] hover:text-[#1C2B3A] hover:bg-[#F7F5F0]'
             }`}
           >
             <FolderUp className="w-4 h-4" />
-            Batch Folder Upload
+            Batch Folder Filing
           </button>
 
           <button
             onClick={() => setActiveTab('ecommerce')}
-            className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all ${
+            className={`flex items-center gap-2 px-5 py-2 text-xs font-semibold tracking-wide transition-all ${
               activeTab === 'ecommerce'
-                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'bg-[#1C2B3A] text-white'
+                : 'text-[#5A6E82] hover:text-[#1C2B3A] hover:bg-[#F7F5F0]'
             }`}
           >
             <Globe className="w-4 h-4" />
-            E-Commerce Scan
+            E-Commerce Surveillance
           </button>
         </div>
       </div>
 
       {error && (
-        <div className="mb-6 p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm text-center">
+        <div className="p-4 bg-[#F9EBE9] border border-[#E09891] text-[#A8342A] text-xs text-center font-mono">
           {error}
         </div>
       )}
 
       {successMsg && (
-        <div className="mb-6 p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-sm text-center flex items-center justify-center gap-2">
-          <CheckCircle className="w-5 h-5 text-emerald-400" />
+        <div className="p-4 bg-[#EAF4EE] border border-[#9BC6AE] text-[#2F6F4E] text-xs text-center flex items-center justify-center gap-2 font-mono">
+          <CheckCircle className="w-4 h-4 text-[#2F6F4E]" />
           {successMsg}
         </div>
       )}
 
       {/* Tab 1: Single Image Scan */}
       {activeTab === 'single' && (
-        <form onSubmit={handleSingleSubmit} className="glass-panel p-8 rounded-2xl shadow-2xl space-y-6">
-          <div className="border-2 border-dashed border-slate-700 hover:border-indigo-500 rounded-2xl p-8 text-center transition-colors relative cursor-pointer group bg-slate-950/40">
+        <form onSubmit={handleSingleSubmit} className="bg-white border border-[#D8D2C6] p-6 sm:p-8 space-y-6">
+          {/* On-Device AR Scale Calibration Action Banner */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-[#FAF3E6] border border-[#DFBF82] gap-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-white border border-[#DFBF82] text-[#B8862B] shrink-0">
+                <Smartphone className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-serif font-bold text-[#1C2B3A]">Live Mobile AR Scale Calibrator</h3>
+                  <span className="px-2 py-0.5 text-[10px] font-mono font-bold uppercase bg-white border border-[#DFBF82] text-[#B8862B]">
+                    Tier 1 (±0.05mm)
+                  </span>
+                </div>
+                <p className="text-xs text-[#5A6E82] mt-0.5">
+                  Tap 2 points on live camera to calculate exact physical millimeters via WebXR depth API.
+                </p>
+                {arPixelsPerMm && (
+                  <p className="text-xs font-mono text-[#2F6F4E] mt-1 font-bold">
+                    ✓ Calibrated: {arPixelsPerMm.toFixed(2)} px/mm ({arCalibrationTier === 'ar_verified' ? 'WebXR AR Verified' : 'Optical Caliper'})
+                  </p>
+                )}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsARModalOpen(true)}
+              className="px-4 py-2.5 bg-[#1C2B3A] hover:bg-[#2A3F55] text-white font-semibold text-xs border border-[#1C2B3A] transition flex items-center justify-center gap-2 cursor-pointer shrink-0"
+            >
+              <Sparkles className="w-4 h-4 text-[#DFBF82]" />
+              Measure via AR Camera
+            </button>
+          </div>
+
+          <div className="border-2 border-dashed border-[#D8D2C6] hover:border-[#1C2B3A] p-8 text-center transition-colors relative cursor-pointer group bg-[#F7F5F0]">
             <input
               type="file"
               accept="image/*"
@@ -181,17 +252,17 @@ export const UploadPage = ({ onScanCompleted, onBatchQueued }: UploadPageProps) 
             />
             {singlePreview ? (
               <div className="space-y-4">
-                <img src={singlePreview} alt="Preview" className="max-h-64 mx-auto rounded-xl shadow-lg border border-slate-800 object-contain" />
-                <p className="text-xs text-indigo-300 font-mono">Selected: {singleFile?.name}</p>
+                <img src={singlePreview} alt="Preview" className="max-h-64 mx-auto border border-[#D8D2C6] object-contain bg-white" />
+                <p className="text-xs text-[#1C2B3A] font-mono">Exhibit: {singleFile?.name}</p>
               </div>
             ) : (
               <div className="space-y-3">
-                <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center mx-auto group-hover:scale-110 transition-transform">
-                  <FileImage className="w-7 h-7" />
+                <div className="w-12 h-12 bg-white border border-[#D8D2C6] text-[#1C2B3A] flex items-center justify-center mx-auto">
+                  <FileImage className="w-6 h-6" />
                 </div>
                 <div>
-                  <p className="text-sm font-semibold text-slate-200">Drag & drop product label image here</p>
-                  <p className="text-xs text-slate-400 mt-1">Supports PNG, JPG, JPEG, WEBP up to 20MB</p>
+                  <p className="text-sm font-serif font-bold text-[#1C2B3A]">Drop Packaging Specimen Photo Here</p>
+                  <p className="text-xs text-[#5A6E82] mt-1">Supports PNG, JPG, JPEG, WEBP up to 20MB</p>
                 </div>
               </div>
             )}
@@ -199,33 +270,33 @@ export const UploadPage = ({ onScanCompleted, onBatchQueued }: UploadPageProps) 
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">Category</label>
+              <label className="block text-xs font-mono uppercase font-semibold text-[#1C2B3A] mb-2">Category</label>
               <input
                 type="text"
                 value={category}
                 onChange={e => setCategory(e.target.value)}
-                className="w-full px-4 py-2.5 rounded-xl glass-input text-sm"
+                className="w-full px-3.5 py-2.5 bg-white border border-[#D8D2C6] text-[#1C2B3A] text-sm focus:outline-none focus:border-[#1C2B3A]"
                 placeholder="e.g. Beverages"
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">Package Width (mm)</label>
+              <label className="block text-xs font-mono uppercase font-semibold text-[#1C2B3A] mb-2">Package Width (mm)</label>
               <input
                 type="number"
                 value={packageWidthMm}
                 onChange={e => setPackageWidthMm(e.target.value)}
-                className="w-full px-4 py-2.5 rounded-xl glass-input text-sm"
-                placeholder="e.g. 150 (Optional scale calibration)"
+                className="w-full px-3.5 py-2.5 bg-white border border-[#D8D2C6] text-[#1C2B3A] text-sm font-mono focus:outline-none focus:border-[#1C2B3A]"
+                placeholder="e.g. 150"
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">Net Quantity (g / ml)</label>
+              <label className="block text-xs font-mono uppercase font-semibold text-[#1C2B3A] mb-2">Net Quantity (g / ml)</label>
               <input
                 type="number"
                 value={netQuantityG}
                 onChange={e => setNetQuantityG(e.target.value)}
-                className="w-full px-4 py-2.5 rounded-xl glass-input text-sm"
-                placeholder="e.g. 500 (For font rules)"
+                className="w-full px-3.5 py-2.5 bg-white border border-[#D8D2C6] text-[#1C2B3A] text-sm font-mono focus:outline-none focus:border-[#1C2B3A]"
+                placeholder="e.g. 500"
               />
             </div>
           </div>
@@ -233,18 +304,18 @@ export const UploadPage = ({ onScanCompleted, onBatchQueued }: UploadPageProps) 
           <button
             type="submit"
             disabled={!singleFile || loadingSingle}
-            className="w-full py-3.5 px-6 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-semibold shadow-lg shadow-indigo-600/30 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+            className="w-full py-3.5 px-6 bg-[#1C2B3A] hover:bg-[#2A3F55] text-white font-semibold text-sm border border-[#1C2B3A] transition-all flex items-center justify-center gap-2 disabled:opacity-50"
           >
             {loadingSingle ? <Loader2 className="w-5 h-5 animate-spin" /> : <Play className="w-5 h-5 fill-current" />}
-            {loadingSingle ? 'Analyzing Product Label...' : 'Run Compliance Scan'}
+            {loadingSingle ? 'Executing Statutory OCR & Calibration Analysis...' : 'Submit Specimen for Compliance Audit'}
           </button>
         </form>
       )}
 
       {/* Tab 2: Batch Folder Upload */}
       {activeTab === 'batch' && (
-        <form onSubmit={handleBatchSubmit} className="glass-panel p-8 rounded-2xl shadow-2xl space-y-6">
-          <div className="border-2 border-dashed border-slate-700 hover:border-indigo-500 rounded-2xl p-8 text-center transition-colors relative cursor-pointer bg-slate-950/40">
+        <form onSubmit={handleBatchSubmit} className="bg-white border border-[#D8D2C6] p-6 sm:p-8 space-y-6">
+          <div className="border-2 border-dashed border-[#D8D2C6] hover:border-[#1C2B3A] p-8 text-center transition-colors relative cursor-pointer bg-[#F7F5F0]">
             <input
               type="file"
               multiple
@@ -253,75 +324,75 @@ export const UploadPage = ({ onScanCompleted, onBatchQueued }: UploadPageProps) 
               className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-10"
             />
             <div className="space-y-3">
-              <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center mx-auto">
-                <FolderUp className="w-7 h-7" />
+              <div className="w-12 h-12 bg-white border border-[#D8D2C6] text-[#1C2B3A] flex items-center justify-center mx-auto">
+                <FolderUp className="w-6 h-6" />
               </div>
               <div>
-                <p className="text-sm font-semibold text-slate-200">Select multiple product label images</p>
-                <p className="text-xs text-slate-400 mt-1">Select a folder or batch of image files</p>
+                <p className="text-sm font-serif font-bold text-[#1C2B3A]">Select Multiple Packaging Specimens</p>
+                <p className="text-xs text-[#5A6E82] mt-1">Select a folder or batch of image files for parallel auditing</p>
               </div>
               {batchFiles.length > 0 && (
-                <div className="mt-4 p-3 bg-indigo-500/10 rounded-xl border border-indigo-500/30 text-indigo-300 text-sm font-medium">
-                  📁 {batchFiles.length} files selected for batch analysis
+                <div className="mt-4 p-3 bg-white border border-[#D8D2C6] text-[#1C2B3A] text-xs font-mono font-bold">
+                  📁 {batchFiles.length} specimen files queued for analysis
                 </div>
               )}
             </div>
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">Batch Category</label>
+            <label className="block text-xs font-mono uppercase font-semibold text-[#1C2B3A] mb-2">Batch Category</label>
             <input
               type="text"
               value={batchCategory}
               onChange={e => setBatchCategory(e.target.value)}
-              className="w-full px-4 py-2.5 rounded-xl glass-input text-sm"
-              placeholder="e.g. FMCG Grocery"
+              className="w-full px-3.5 py-2.5 bg-white border border-[#D8D2C6] text-[#1C2B3A] text-sm focus:outline-none focus:border-[#1C2B3A]"
+              placeholder="e.g. FMCG Packaged Commodities"
             />
           </div>
 
           <button
             type="submit"
             disabled={batchFiles.length === 0 || loadingBatch}
-            className="w-full py-3.5 px-6 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-semibold shadow-lg shadow-indigo-600/30 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+            className="w-full py-3.5 px-6 bg-[#1C2B3A] hover:bg-[#2A3F55] text-white font-semibold text-sm border border-[#1C2B3A] transition-all flex items-center justify-center gap-2 disabled:opacity-50"
           >
             {loadingBatch ? <Loader2 className="w-5 h-5 animate-spin" /> : <Play className="w-5 h-5 fill-current" />}
-            {loadingBatch ? `Processing ${batchFiles.length} Scans...` : `Process Batch (${batchFiles.length} Images)`}
+            {loadingBatch ? `Auditing ${batchFiles.length} Files...` : `Process Batch Docket (${batchFiles.length} Images)`}
           </button>
         </form>
       )}
 
       {/* Tab 3: E-Commerce Category Scan */}
       {activeTab === 'ecommerce' && (
-        <form onSubmit={handleEcomSubmit} className="glass-panel p-8 rounded-2xl shadow-2xl space-y-6">
+        <form onSubmit={handleEcomSubmit} className="bg-white border border-[#D8D2C6] p-6 sm:p-8 space-y-6">
           <div>
-            <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-              E-Commerce Category URL
+            <label className="block text-xs font-mono uppercase font-semibold text-[#1C2B3A] mb-2">
+              E-Commerce Category Listing URL
             </label>
             <div className="relative">
-              <Globe className="w-5 h-5 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <Globe className="w-5 h-5 text-[#5A6E82] absolute left-3.5 top-1/2 -translate-y-1/2" />
               <input
                 type="url"
                 required
                 value={categoryUrl}
                 onChange={e => setCategoryUrl(e.target.value)}
                 placeholder="https://www.amazon.in/s?k=packaged+biscuits"
-                className="w-full pl-11 pr-4 py-3 rounded-xl glass-input text-sm"
+                className="w-full pl-11 pr-4 py-3 bg-white border border-[#D8D2C6] text-[#1C2B3A] text-sm font-mono focus:outline-none focus:border-[#1C2B3A]"
               />
             </div>
-            <p className="text-xs text-slate-400 mt-2">
-              Supports Amazon, Flipkart, BigBasket, and general e-commerce listing pages.
+            <p className="text-xs text-[#5A6E82] mt-2">
+              Audits Rule 6(10) mandatory declarations across Amazon, Flipkart, BigBasket, and Zepto.
             </p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-                Max Pages to Scrape
+              <label className="block text-xs font-mono uppercase font-semibold text-[#1C2B3A] mb-2">
+                Max Catalog Pages
               </label>
               <select
                 value={maxPages}
                 onChange={e => setMaxPages(parseInt(e.target.value))}
-                className="w-full px-4 py-2.5 rounded-xl glass-input text-sm"
+                className="w-full px-3.5 py-2.5 bg-white border border-[#D8D2C6] text-[#1C2B3A] text-sm focus:outline-none focus:border-[#1C2B3A]"
               >
                 <option value={1}>1 Page (~20 items)</option>
                 <option value={2}>2 Pages (~40 items)</option>
@@ -330,12 +401,12 @@ export const UploadPage = ({ onScanCompleted, onBatchQueued }: UploadPageProps) 
               </select>
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-                Background Engine
+              <label className="block text-xs font-mono uppercase font-semibold text-[#1C2B3A] mb-2">
+                Surveillance Worker
               </label>
-              <div className="px-4 py-2.5 rounded-xl bg-slate-950/60 border border-slate-800 text-xs font-mono text-indigo-300 flex items-center justify-between">
-                <span>Scrapy + Celery Redis Task</span>
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <div className="px-3.5 py-2.5 bg-[#F7F5F0] border border-[#D8D2C6] text-xs font-mono text-[#1C2B3A] flex items-center justify-between">
+                <span>Scrapy + Celery Redis Worker</span>
+                <span className="w-2 h-2 bg-[#2F6F4E] animate-pulse" />
               </div>
             </div>
           </div>
@@ -343,13 +414,20 @@ export const UploadPage = ({ onScanCompleted, onBatchQueued }: UploadPageProps) 
           <button
             type="submit"
             disabled={loadingEcom || !categoryUrl}
-            className="w-full py-3.5 px-6 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-semibold shadow-lg shadow-indigo-600/30 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+            className="w-full py-3.5 px-6 bg-[#1C2B3A] hover:bg-[#2A3F55] text-white font-semibold text-sm border border-[#1C2B3A] transition-all flex items-center justify-center gap-2 disabled:opacity-50"
           >
             {loadingEcom ? <Loader2 className="w-5 h-5 animate-spin" /> : <Play className="w-5 h-5 fill-current" />}
-            {loadingEcom ? 'Launching E-Commerce Scraper...' : 'Launch Scraper & Batch Scan'}
+            {loadingEcom ? 'Scraping E-Commerce Catalog...' : 'Launch Automated Compliance Scraper'}
           </button>
         </form>
       )}
+
+      {/* AR Mobile Capture Modal */}
+      <ARMobileCaptureModal
+        isOpen={isARModalOpen}
+        onClose={() => setIsARModalOpen(false)}
+        onCapture={handleARCapture}
+      />
     </div>
   );
 };

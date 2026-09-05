@@ -20,10 +20,12 @@ passlib[bcrypt]>=1.7.4
 # Image Preprocessing & Computer Vision
 opencv-python-headless>=4.10.0
 numpy>=1.26.0
+Pillow>=10.0.0
 
 # Dual-Engine OCR & GenAI Vision
 pytesseract>=0.3.10
 easyocr>=1.7.1
+paddleocr>=2.8.0
 google-genai>=0.1.1
 
 # Async Tasks & Queue

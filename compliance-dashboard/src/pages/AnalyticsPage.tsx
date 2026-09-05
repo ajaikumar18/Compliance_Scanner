@@ -3,8 +3,9 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   BarChart, Bar, Cell
 } from 'recharts';
-import { ShieldCheck, AlertTriangle, FileText, Search, Download, ExternalLink, Filter } from 'lucide-react';
+import { FileText, Search, Download, ExternalLink } from 'lucide-react';
 import { getReportDownloadUrl } from '../services/api';
+import { ReInspectionQueue } from '../components/ReInspectionQueue';
 import type { ScanResult } from '../types';
 
 interface AnalyticsPageProps {
@@ -16,6 +17,15 @@ export const AnalyticsPage = ({ scans, onSelectScan }: AnalyticsPageProps) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
+
+  const handleInspectTriggerScan = (scanId: number) => {
+    const found = scans.find(s => s.scan_id === scanId);
+    if (found) {
+      onSelectScan(found);
+    } else if (scans.length > 0) {
+      onSelectScan(scans[0]);
+    }
+  };
 
   // Compute Analytics Statistics
   const totalScans = scans.length;
@@ -40,9 +50,9 @@ export const AnalyticsPage = ({ scans, onSelectScan }: AnalyticsPageProps) => {
   });
 
   const violationTypeChartData = [
-    { name: 'Missing Field', count: violationCounts.missing || 1, color: '#ef4444' },
-    { name: 'Incorrect Format', count: violationCounts.incorrect_format || 2, color: '#f59e0b' },
-    { name: 'Undersized Font', count: violationCounts.undersized_font || 3, color: '#3b82f6' },
+    { name: 'Missing Field', count: violationCounts.missing || 1, color: '#A8342A' },
+    { name: 'Incorrect Format', count: violationCounts.incorrect_format || 2, color: '#B8862B' },
+    { name: 'Undersized Font', count: violationCounts.undersized_font || 3, color: '#1C2B3A' },
   ];
 
   // Chart Data: Scans Over Time
@@ -68,96 +78,152 @@ export const AnalyticsPage = ({ scans, onSelectScan }: AnalyticsPageProps) => {
   const categories = Array.from(new Set(scans.map(s => s.product_category)));
 
   return (
-    <div className="max-w-7xl mx-auto py-6 px-4 space-y-8">
+    <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 space-y-8">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-white tracking-tight">Compliance Analytics & Audit Log</h1>
-        <p className="text-xs text-slate-400 mt-1">Real-time Legal Metrology violation trends and searchable scan repository.</p>
-      </div>
-
-      {/* KPI Cards Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="glass-panel p-5 rounded-2xl border-l-4 border-l-indigo-500 flex items-center justify-between">
+      <div className="border-b border-[#D8D2C6] pb-4">
+        <div className="flex flex-col sm:flex-row sm:items-baseline justify-between gap-2">
           <div>
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Total Scans</p>
-            <h3 className="text-2xl font-bold text-white mt-1">{totalScans}</h3>
+            <h1 className="text-2xl sm:text-3xl font-bold font-serif text-[#1C2B3A] tracking-tight">
+              Compliance Analytics & Audit Log
+            </h1>
+            <p className="text-xs text-[#5E6E80] mt-1 font-sans">
+              Statutory verification under the Legal Metrology (Packaged Commodities) Rules 2011.
+            </p>
           </div>
-          <div className="p-3 rounded-xl bg-indigo-500/10 text-indigo-400">
-            <FileText className="w-6 h-6" />
-          </div>
-        </div>
-
-        <div className="glass-panel p-5 rounded-2xl border-l-4 border-l-emerald-500 flex items-center justify-between">
-          <div>
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Compliance Rate</p>
-            <h3 className="text-2xl font-bold text-emerald-400 mt-1">{complianceRate}%</h3>
-          </div>
-          <div className="p-3 rounded-xl bg-emerald-500/10 text-emerald-400">
-            <ShieldCheck className="w-6 h-6" />
-          </div>
-        </div>
-
-        <div className="glass-panel p-5 rounded-2xl border-l-4 border-l-rose-500 flex items-center justify-between">
-          <div>
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Non-Compliant</p>
-            <h3 className="text-2xl font-bold text-rose-400 mt-1">{nonCompliantScans}</h3>
-          </div>
-          <div className="p-3 rounded-xl bg-rose-500/10 text-rose-400">
-            <AlertTriangle className="w-6 h-6" />
-          </div>
-        </div>
-
-        <div className="glass-panel p-5 rounded-2xl border-l-4 border-l-amber-500 flex items-center justify-between">
-          <div>
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Needs Review</p>
-            <h3 className="text-2xl font-bold text-amber-400 mt-1">{partialScans}</h3>
-          </div>
-          <div className="p-3 rounded-xl bg-amber-500/10 text-amber-400">
-            <Filter className="w-6 h-6" />
+          <div className="text-xs font-mono text-[#5E6E80] bg-[#FAF8F5] px-3 py-1 border border-[#D8D2C6]">
+            OFFICIAL LEDGER • REGISTER NO. LM-2026-IN
           </div>
         </div>
       </div>
 
-      {/* Analytics Charts Grid */}
+      {/* ── Ruled Ledger-Row Summary Layout (Replaces Card Grid) ─────────────── */}
+      <div className="bg-white border border-[#D8D2C6] rounded-none">
+        <div className="px-5 py-3 border-b border-[#D8D2C6] bg-[#FAF8F5] flex items-center justify-between">
+          <div className="flex items-center gap-2 text-[#1C2B3A]">
+            <FileText className="w-4 h-4 text-[#1C2B3A]" />
+            <span className="font-serif font-bold text-xs uppercase tracking-wider">
+              Statutory Compliance Ledger • Summary Docket
+            </span>
+          </div>
+          <span className="text-[11px] font-mono text-[#5E6E80]">
+            Audit Period: 2026-Q3
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-[#D8D2C6]">
+          {/* Column 1: Total Audited Commodities */}
+          <div className="p-5 space-y-1.5 bg-white">
+            <div className="flex items-center justify-between text-xs text-[#5E6E80] uppercase font-semibold font-sans">
+              <span>Audited Commodities</span>
+              <span className="font-mono text-[10px] bg-[#F7F5F0] px-1.5 py-0.5 border border-[#D8D2C6] text-[#1C2B3A]">REG-01</span>
+            </div>
+            <div className="text-3xl font-bold font-serif text-[#1C2B3A]">{totalScans}</div>
+            <p className="text-xs text-[#5E6E80] font-sans">Retail packaging & e-commerce catalogs</p>
+          </div>
+
+          {/* Column 2: Compliance Rate */}
+          <div className="p-5 space-y-1.5 bg-[#EAF4EE]/40">
+            <div className="flex items-center justify-between text-xs text-[#2F6F4E] uppercase font-semibold font-sans">
+              <span>Statutory Compliance</span>
+              <span className="font-mono text-[10px] bg-[#EAF4EE] px-1.5 py-0.5 border border-[#9BC6AE] text-[#2F6F4E]">RATE</span>
+            </div>
+            <div className="text-3xl font-bold font-serif text-[#2F6F4E]">{complianceRate}%</div>
+            <p className="text-xs text-[#5E6E80] font-sans">{compliantScans} fully verified commodities</p>
+          </div>
+
+          {/* Column 3: Flagged Non-Compliant */}
+          <div className="p-5 space-y-1.5 bg-[#F9EBE9]/40">
+            <div className="flex items-center justify-between text-xs text-[#A8342A] uppercase font-semibold font-sans">
+              <span>Flagged Violations</span>
+              <span className="font-mono text-[10px] bg-[#F9EBE9] px-1.5 py-0.5 border border-[#E09891] text-[#A8342A]">BREACH</span>
+            </div>
+            <div className="text-3xl font-bold font-serif text-[#A8342A]">{nonCompliantScans}</div>
+            <p className="text-xs text-[#5E6E80] font-sans">Actionable Rule 6 & 7 violations</p>
+          </div>
+
+          {/* Column 4: Pending / Review */}
+          <div className="p-5 space-y-1.5 bg-[#FAF3E6]/40">
+            <div className="flex items-center justify-between text-xs text-[#B8862B] uppercase font-semibold font-sans">
+              <span>Pending Investigation</span>
+              <span className="font-mono text-[10px] bg-[#FAF3E6] px-1.5 py-0.5 border border-[#DFBF82] text-[#B8862B]">REVIEW</span>
+            </div>
+            <div className="text-3xl font-bold font-serif text-[#B8862B]">{partialScans}</div>
+            <p className="text-xs text-[#5E6E80] font-sans">Disputed evidence or pending AR audit</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Enforcement Discrepancy & Re-Inspection Queue */}
+      <ReInspectionQueue onSelectScan={handleInspectTriggerScan} />
+
+      {/* ── Analytics Charts Grid ────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Violation Trends Area Chart */}
-        <div className="lg:col-span-7 glass-panel p-6 rounded-2xl space-y-4">
-          <h3 className="text-sm font-bold text-white uppercase tracking-wider">Scan Trends Over Time</h3>
-          <div className="h-64 w-full pt-4">
+        <div className="lg:col-span-7 bg-white border border-[#D8D2C6] rounded-none p-5 space-y-4">
+          <div className="border-b border-[#D8D2C6] pb-3 flex items-center justify-between">
+            <h3 className="text-xs font-bold font-serif text-[#1C2B3A] uppercase tracking-wider">
+              Scan Trends Over Time
+            </h3>
+            <span className="text-[11px] font-mono text-[#5E6E80]">7-Day Trend</span>
+          </div>
+          <div className="h-64 w-full pt-2">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={scansOverTimeData}>
                 <defs>
-                  <linearGradient id="colorCompliant" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.4}/>
-                    <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                  <linearGradient id="colorCompliantAudit" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#2F6F4E" stopOpacity={0.25}/>
+                    <stop offset="95%" stopColor="#2F6F4E" stopOpacity={0.02}/>
                   </linearGradient>
-                  <linearGradient id="colorNonCompliant" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#ef4444" stopOpacity={0.4}/>
-                    <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
+                  <linearGradient id="colorNonCompliantAudit" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#A8342A" stopOpacity={0.25}/>
+                    <stop offset="95%" stopColor="#A8342A" stopOpacity={0.02}/>
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.5} />
-                <XAxis dataKey="date" stroke="#94a3b8" fontSize={11} />
-                <YAxis stroke="#94a3b8" fontSize={11} />
-                <Tooltip contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px' }} />
-                <Area type="monotone" dataKey="compliant" name="Compliant" stroke="#10b981" fillOpacity={1} fill="url(#colorCompliant)" />
-                <Area type="monotone" dataKey="non_compliant" name="Non-Compliant" stroke="#ef4444" fillOpacity={1} fill="url(#colorNonCompliant)" />
+                <CartesianGrid strokeDasharray="2 2" stroke="#E2DDD5" />
+                <XAxis dataKey="date" stroke="#5E6E80" fontSize={11} fontFamily="'IBM Plex Mono', monospace" />
+                <YAxis stroke="#5E6E80" fontSize={11} fontFamily="'IBM Plex Mono', monospace" />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: '#FFFFFF',
+                    borderColor: '#D8D2C6',
+                    borderRadius: '0px',
+                    color: '#1C2B3A',
+                    fontFamily: "'IBM Plex Mono', monospace",
+                    fontSize: '11px',
+                  }}
+                />
+                <Area type="monotone" dataKey="compliant" name="Compliant" stroke="#2F6F4E" strokeWidth={2} fillOpacity={1} fill="url(#colorCompliantAudit)" />
+                <Area type="monotone" dataKey="non_compliant" name="Flagged" stroke="#A8342A" strokeWidth={2} fillOpacity={1} fill="url(#colorNonCompliantAudit)" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
         </div>
 
         {/* Violation Types Bar Chart */}
-        <div className="lg:col-span-5 glass-panel p-6 rounded-2xl space-y-4">
-          <h3 className="text-sm font-bold text-white uppercase tracking-wider">Most Common Violation Types</h3>
-          <div className="h-64 w-full pt-4">
+        <div className="lg:col-span-5 bg-white border border-[#D8D2C6] rounded-none p-5 space-y-4">
+          <div className="border-b border-[#D8D2C6] pb-3 flex items-center justify-between">
+            <h3 className="text-xs font-bold font-serif text-[#1C2B3A] uppercase tracking-wider">
+              Primary Statutory Infractions
+            </h3>
+            <span className="text-[11px] font-mono text-[#5E6E80]">Rule Breakdown</span>
+          </div>
+          <div className="h-64 w-full pt-2">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={violationTypeChartData} layout="vertical">
-                <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.5} />
-                <XAxis type="number" stroke="#94a3b8" fontSize={11} />
-                <YAxis dataKey="name" type="category" stroke="#94a3b8" fontSize={10} width={100} />
-                <Tooltip contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px' }} />
-                <Bar dataKey="count" radius={[0, 4, 4, 0]}>
+                <CartesianGrid strokeDasharray="2 2" stroke="#E2DDD5" />
+                <XAxis type="number" stroke="#5E6E80" fontSize={11} fontFamily="'IBM Plex Mono', monospace" />
+                <YAxis dataKey="name" type="category" stroke="#1C2B3A" fontSize={11} width={110} />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: '#FFFFFF',
+                    borderColor: '#D8D2C6',
+                    borderRadius: '0px',
+                    color: '#1C2B3A',
+                    fontFamily: "'IBM Plex Mono', monospace",
+                    fontSize: '11px',
+                  }}
+                />
+                <Bar dataKey="count" radius={0}>
                   {violationTypeChartData.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={entry.color} />
                   ))}
@@ -168,33 +234,37 @@ export const AnalyticsPage = ({ scans, onSelectScan }: AnalyticsPageProps) => {
         </div>
       </div>
 
-      {/* Searchable Scan Repository Table */}
-      <div className="glass-panel p-6 rounded-2xl space-y-6">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      {/* ── Official Legal Metrology Inspection Register ───────────────────── */}
+      <div className="bg-white border border-[#D8D2C6] rounded-none p-5 space-y-5">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[#D8D2C6] pb-4">
           <div>
-            <h3 className="text-base font-bold text-white tracking-tight">Audit Scan Repository</h3>
-            <p className="text-xs text-slate-400 mt-0.5">Filter and review previous product label compliance scans</p>
+            <h3 className="text-base font-bold font-serif text-[#1C2B3A] tracking-tight">
+              Inspection Register & Scan Repository
+            </h3>
+            <p className="text-xs text-[#5E6E80] mt-0.5">
+              Certified logbook of physical packaging scans and e-commerce listings audited.
+            </p>
           </div>
 
           {/* Search & Filter Bar */}
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2.5">
             <div className="relative">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <Search className="w-3.5 h-3.5 text-[#5E6E80] absolute left-2.5 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                placeholder="Search product or category..."
+                placeholder="Search commodity or category..."
                 value={searchTerm}
                 onChange={e => setSearchTerm(e.target.value)}
-                className="pl-9 pr-4 py-2 rounded-xl glass-input text-xs w-56"
+                className="pl-8 pr-3 py-1.5 bg-white border border-[#C4BCAC] text-xs text-[#1C2B3A] placeholder-[#8C9BAA] rounded-none w-52 focus:outline-none focus:border-[#1C2B3A]"
               />
             </div>
 
             <select
               value={statusFilter}
               onChange={e => setStatusFilter(e.target.value)}
-              className="px-3 py-2 rounded-xl glass-input text-xs"
+              className="px-2.5 py-1.5 bg-white border border-[#C4BCAC] text-xs text-[#1C2B3A] rounded-none focus:outline-none focus:border-[#1C2B3A]"
             >
-              <option value="all">All Statuses</option>
+              <option value="all">All Verdicts</option>
               <option value="compliant">Compliant</option>
               <option value="non_compliant">Non-Compliant</option>
               <option value="partial_review_needed">Needs Review</option>
@@ -203,7 +273,7 @@ export const AnalyticsPage = ({ scans, onSelectScan }: AnalyticsPageProps) => {
             <select
               value={categoryFilter}
               onChange={e => setCategoryFilter(e.target.value)}
-              className="px-3 py-2 rounded-xl glass-input text-xs"
+              className="px-2.5 py-1.5 bg-white border border-[#C4BCAC] text-xs text-[#1C2B3A] rounded-none focus:outline-none focus:border-[#1C2B3A]"
             >
               <option value="all">All Categories</option>
               {categories.map(c => (
@@ -217,59 +287,62 @@ export const AnalyticsPage = ({ scans, onSelectScan }: AnalyticsPageProps) => {
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="border-b border-slate-800 text-slate-400 text-xs uppercase tracking-wider">
-                <th className="pb-3 font-semibold">ID</th>
-                <th className="pb-3 font-semibold">Product Name</th>
-                <th className="pb-3 font-semibold">Category</th>
-                <th className="pb-3 font-semibold">Mode</th>
-                <th className="pb-3 font-semibold">Status</th>
-                <th className="pb-3 font-semibold">Violations</th>
-                <th className="pb-3 font-semibold">Date</th>
-                <th className="pb-3 font-semibold text-right">Actions</th>
+              <tr className="border-b-2 border-[#1C2B3A] text-[#1C2B3A] text-xs uppercase font-serif tracking-wider bg-[#FAF8F5]">
+                <th className="py-2.5 px-3 font-bold">Docket ID</th>
+                <th className="py-2.5 px-3 font-bold">Product Name</th>
+                <th className="py-2.5 px-3 font-bold">Category</th>
+                <th className="py-2.5 px-3 font-bold">Mode</th>
+                <th className="py-2.5 px-3 font-bold">Verdict</th>
+                <th className="py-2.5 px-3 font-bold">Violations</th>
+                <th className="py-2.5 px-3 font-bold">Audit Date</th>
+                <th className="py-2.5 px-3 font-bold text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800/60 text-xs">
+            <tbody className="divide-y divide-[#D8D2C6] text-xs font-sans">
               {filteredScans.map(scan => {
-                let statusBadge = 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30';
-                if (scan.compliance_status === 'non_compliant') statusBadge = 'bg-rose-500/20 text-rose-300 border-rose-500/30';
-                if (scan.compliance_status === 'partial_review_needed') statusBadge = 'bg-amber-500/20 text-amber-300 border-amber-500/30';
+                let statusBadge = 'bg-[#EAF4EE] text-[#2F6F4E] border border-[#9BC6AE]';
+                if (scan.compliance_status === 'non_compliant') {
+                  statusBadge = 'bg-[#F9EBE9] text-[#A8342A] border border-[#E09891]';
+                } else if (scan.compliance_status === 'partial_review_needed') {
+                  statusBadge = 'bg-[#FAF3E6] text-[#B8862B] border border-[#DFBF82]';
+                }
 
                 return (
-                  <tr key={scan.scan_id} className="hover:bg-slate-800/40 transition-colors">
-                    <td className="py-3.5 font-mono text-slate-400">#{scan.scan_id}</td>
-                    <td className="py-3.5 font-bold text-slate-200">{scan.product_name}</td>
-                    <td className="py-3.5 text-slate-300">{scan.product_category}</td>
-                    <td className="py-3.5 font-mono text-slate-400 uppercase">{scan.scan_type}</td>
-                    <td className="py-3.5">
-                      <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase border ${statusBadge}`}>
+                  <tr key={scan.scan_id} className="hover:bg-[#FAF8F5] transition-colors">
+                    <td className="py-3 px-3 font-mono text-[#1C2B3A]">#{scan.scan_id}</td>
+                    <td className="py-3 px-3 font-semibold text-[#1C2B3A]">{scan.product_name}</td>
+                    <td className="py-3 px-3 text-[#5E6E80]">{scan.product_category}</td>
+                    <td className="py-3 px-3 font-mono text-[#5E6E80] uppercase">{scan.scan_type}</td>
+                    <td className="py-3 px-3">
+                      <span className={`px-2 py-0.5 rounded-none text-[10px] font-mono font-semibold uppercase ${statusBadge}`}>
                         {scan.compliance_status.replace(/_/g, ' ')}
                       </span>
                     </td>
-                    <td className="py-3.5 font-bold">
+                    <td className="py-3 px-3 font-mono">
                       {scan.violations_count > 0 ? (
-                        <span className="text-rose-400">{scan.violations_count} detected</span>
+                        <span className="text-[#A8342A] font-bold">{scan.violations_count} detected</span>
                       ) : (
-                        <span className="text-emerald-400">0</span>
+                        <span className="text-[#2F6F4E]">0</span>
                       )}
                     </td>
-                    <td className="py-3.5 text-slate-400 font-mono text-[11px]">
+                    <td className="py-3 px-3 text-[#5E6E80] font-mono text-[11px]">
                       {new Date(scan.created_at).toLocaleDateString()}
                     </td>
-                    <td className="py-3.5 text-right space-x-2">
+                    <td className="py-3 px-3 text-right space-x-2">
                       <button
                         onClick={() => onSelectScan(scan)}
-                        className="px-2.5 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white transition-all inline-flex items-center gap-1"
+                        className="px-2.5 py-1 bg-[#1C2B3A] text-white hover:bg-[#2E3F50] transition-colors inline-flex items-center gap-1 text-xs font-sans rounded-none"
                       >
-                        <ExternalLink className="w-3.5 h-3.5" />
-                        View
+                        <ExternalLink className="w-3 h-3" />
+                        Inspect
                       </button>
 
                       <a
                         href={getReportDownloadUrl(scan.scan_id, 'pdf')}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors inline-block"
-                        title="Download PDF"
+                        className="p-1.5 border border-[#D8D2C6] hover:bg-[#EFECE6] text-[#1C2B3A] inline-block rounded-none transition-colors"
+                        title="Download Certified PDF Report"
                       >
                         <Download className="w-3.5 h-3.5" />
                       </a>

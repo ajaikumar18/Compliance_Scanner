@@ -10,7 +10,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.core.database import engine
-from app.routers import auth, health, reports, scans
+from app.routers import auth, health, ledger, reports, scans, tickets
+
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -33,6 +34,22 @@ async def lifespan(app: FastAPI):
         logger.info("✅  Database connection verified")
     except Exception as exc:
         logger.error("❌  Database connection failed: %s", exc)
+
+    import asyncio
+
+    # ── Pre-warm PaddleOCR GPU engine in background ───────────────────────────
+    # Loads CUDA models into VRAM at startup so the FIRST scan request
+    # is not penalised by the 25-30s cold initialization delay.
+    async def _warmup_paddle():
+        try:
+            from app.services.field_classifier import LaptopLayoutClassifier
+            logger.info("🔥  Pre-warming PaddleOCR GPU engine in background...")
+            await asyncio.to_thread(LaptopLayoutClassifier.get_paddle_engine)
+            logger.info("✅  PaddleOCR GPU engine warm and ready in VRAM.")
+        except Exception as exc:
+            logger.warning("⚠️  PaddleOCR warm-up failed (non-fatal): %s", exc)
+
+    asyncio.create_task(_warmup_paddle())
 
     yield  # ← app is running
 
@@ -65,8 +82,11 @@ app.add_middleware(
 # ── Routers ───────────────────────────────────────────────────────────────────
 app.include_router(auth.router)
 app.include_router(health.router)
+app.include_router(ledger.router)
 app.include_router(reports.router)
 app.include_router(scans.router)
+app.include_router(tickets.router)
+
 
 
 # ── Root redirect ─────────────────────────────────────────────────────────────

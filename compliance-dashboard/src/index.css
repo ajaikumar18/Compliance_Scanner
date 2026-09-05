@@ -1,63 +1,153 @@
 @import "tailwindcss";
 
 @layer base {
+  :root {
+    --bg-parchment: #F7F5F0;
+    --ink-navy: #1C2B3A;
+    --ink-navy-dark: #121D28;
+    --ink-muted: #5E6E80;
+    --ruled-border: #D8D2C6;
+    --ruled-border-subtle: #E8E4DC;
+
+    --verdict-compliant: #2F6F4E;
+    --verdict-compliant-bg: #EAF4EE;
+    --verdict-compliant-border: #9BC6AE;
+
+    --verdict-pending: #B8862B;
+    --verdict-pending-bg: #FAF3E6;
+    --verdict-pending-border: #DFBF82;
+
+    --verdict-flagged: #A8342A;
+    --verdict-flagged-bg: #F9EBE9;
+    --verdict-flagged-border: #E09891;
+  }
+
   body {
-    @apply bg-slate-900 text-slate-100 antialiased font-sans selection:bg-indigo-500 selection:text-white min-h-screen;
-    background-image: 
-      radial-gradient(at 0% 0%, rgba(30, 41, 59, 0.7) 0px, transparent 50%),
-      radial-gradient(at 100% 0%, rgba(15, 23, 42, 0.9) 0px, transparent 50%),
-      radial-gradient(at 50% 100%, rgba(30, 27, 75, 0.4) 0px, transparent 50%);
+    background-color: #F7F5F0;
+    color: #1C2B3A;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    min-height: 100vh;
+  }
+
+  h1, h2, h3, h4, .font-heading, .font-serif-heading {
+    font-family: 'Fraunces', Georgia, serif;
+    color: #1C2B3A;
+  }
+
+  .font-mono-audit {
+    font-family: 'IBM Plex Mono', monospace;
   }
 }
 
-/* Glassmorphism utilities */
-.glass-panel {
-  background: rgba(15, 23, 42, 0.75);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
+/* ── Audit & Evidence UI Utility Classes (No Glassmorphism, No Drop Shadows) ─ */
+
+/* Flat paper sheet / dossier card */
+.glass-panel, .audit-card {
+  background-color: #FFFFFF;
+  border: 1px solid #D8D2C6;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
-.glass-card {
-  background: rgba(30, 41, 59, 0.6);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  transition: all 0.25s ease-in-out;
+/* Ruled ledger row */
+.audit-row {
+  border-bottom: 1px solid #D8D2C6;
 }
 
-.glass-card:hover {
-  border-color: rgba(99, 102, 241, 0.3);
-  transform: translateY(-2px);
-  box-shadow: 0 10px 30px -10px rgba(79, 70, 229, 0.25);
+/* Subtle docket item */
+.glass-card, .audit-subcard {
+  background-color: #FAF8F5;
+  border: 1px solid #E2DDD5;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  transition: border-color 0.15s ease;
 }
 
-.glass-input {
-  background: rgba(15, 23, 42, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #f8fafc;
-  transition: border-color 0.2s ease;
+.glass-card:hover, .audit-subcard:hover {
+  border-color: #1C2B3A;
+  box-shadow: none;
+  transform: none;
 }
 
-.glass-input:focus {
+/* Form input styled as official docket line */
+.glass-input, .audit-input {
+  background-color: #FFFFFF;
+  border: 1px solid #C4BCAC;
+  color: #1C2B3A;
+  border-radius: 4px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.glass-input:focus, .audit-input:focus {
   outline: none;
-  border-color: #6366f1;
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+  border-color: #1C2B3A;
+  box-shadow: 0 0 0 2px rgba(28, 43, 58, 0.12);
 }
 
-/* Custom scrollbars */
+/* Official rubber stamp / seal badges */
+.stamp-seal {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-transform: uppercase;
+  font-family: 'Fraunces', Georgia, serif;
+  letter-spacing: 0.08em;
+  border: 3px double currentColor;
+  padding: 0.6rem 1.2rem;
+  background-color: transparent;
+  user-select: none;
+}
+
+.stamp-seal-circle {
+  border-radius: 9999px;
+  border: 3px double currentColor;
+  text-align: center;
+  padding: 1rem;
+}
+
+.stamp-seal-rect {
+  border-radius: 2px;
+  border: 3px double currentColor;
+}
+
+/* Millimeter Ruler Tick Styling */
+.ruler-ticks-h {
+  background-image: repeating-linear-gradient(
+    to right,
+    #1C2B3A 0,
+    #1C2B3A 1px,
+    transparent 1px,
+    transparent 10px
+  );
+}
+
+.ruler-ticks-v {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    #1C2B3A 0,
+    #1C2B3A 1px,
+    transparent 1px,
+    transparent 10px
+  );
+}
+
+/* Clean document scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: rgba(15, 23, 42, 0.5);
+  background: #EFECE6;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(99, 102, 241, 0.3);
-  border-radius: 3px;
+  background: #C4BCAC;
+  border-radius: 2px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(99, 102, 241, 0.6);
+  background: #1C2B3A;
 }

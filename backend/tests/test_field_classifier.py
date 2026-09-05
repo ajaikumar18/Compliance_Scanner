@@ -54,6 +54,7 @@ MANDATORY_FIELDS = {
     "net_quantity",
     "mrp",
     "manufacture_date",
+    "expiry_date",
     "consumer_care_details",
     "country_of_origin",
 }
@@ -79,9 +80,14 @@ FIELD_SAMPLES: list[tuple[str, str]] = [
     # Manufacture Date
     ("manufacture_date", "Mfg. Date: 12/2025"),
     ("manufacture_date", "Manufactured on Jan 2026"),
-    ("manufacture_date", "Best Before: 06-2026"),
-    ("manufacture_date", "Expiry Date: 31/12/2026"),
-    ("manufacture_date", "BBE: Oct 2025"),
+    ("manufacture_date", "Packed on 15/03/2025"),
+    ("manufacture_date", "Date of Mfg: 10/2025"),
+
+    # Expiry Date
+    ("expiry_date", "Use By: 15/04/2026"),
+    ("expiry_date", "Best Before: 06-2026"),
+    ("expiry_date", "Expiry Date: 31/12/2026"),
+    ("expiry_date", "BBE: Oct 2025"),
 
     # Manufacturer Name & Address
     ("manufacturer_name_address", "Manufactured by XYZ Foods Pvt. Ltd."),
@@ -297,6 +303,7 @@ class TestEdgeCases:
             _blk("Net Wt. 500 g"),
             _blk("Manufactured by XYZ Pvt. Ltd., Mumbai"),
             _blk("Mfg. Date: Jan 2026"),
+            _blk("Use By: 15/04/2026"),
             _blk("Consumer Care: 1800-123-4567"),
             _blk("Country of Origin: India"),
         ]
@@ -351,3 +358,47 @@ class TestEdgeCases:
         assert cb["bbox"] == [5, 10, 150, 25]
         assert cb["confidence"] == 0.88
         assert cb["engine_used"] == "easyocr"
+
+    def test_date_collision_prevention(self):
+        """When an OCR pool has only one date, manufacture_date and expiry_date must never collide."""
+        blocks = [
+            _blk("PKD. 16/10/25"),
+            _blk("USE BY"),
+        ]
+        result = classify_fields(blocks)
+        mfg = [b for b in result["classified"] if b["field"] == "manufacture_date"]
+        exp = [b for b in result["classified"] if b["field"] == "expiry_date"]
+        assert len(mfg) == 1
+        assert "16/10/25" in mfg[0]["text"]
+        # Expiry date must not steal the manufacture date
+        assert len(exp) == 0 or exp[0]["text"] != mfg[0]["text"]
+
+    def test_serving_size_not_classified_as_net_quantity(self):
+        """Serving size and nutritional noise like 'Per approx. 15 g serve' must never be selected over net quantity."""
+        blocks = [
+            _blk("Per approx. 15 g serve"),
+            _blk("(Approx. 3 Biscuits)"),
+            _blk("Energy 67 kcal"),
+            _blk("FOR 64 g~"),
+            _blk("BISCUITS NET WEIGHT 64 g"),
+            _blk("MRP Rs. 10.00"),
+        ]
+        result = classify_fields(blocks)
+        net_qty = result.get("extracted_fields", {}).get("net_quantity", {})
+        assert net_qty
+        # Must resolve to 64g, never 15g
+        assert "64" in net_qty.get("extracted_value", "")
+        assert "15" not in net_qty.get("extracted_value", "")
+
+    def test_serving_size_alone_does_not_claim_net_quantity(self):
+        """When only serving size is in OCR text without total net weight, it must not falsely classify as net quantity."""
+        blocks = [
+            _blk("Per approx. 15 g serve"),
+            _blk("(Approx. 3 Biscuits)"),
+            _blk("Energy 67 kcal"),
+        ]
+        result = classify_fields(blocks)
+        net_qty = result.get("extracted_fields", {}).get("net_quantity")
+        assert net_qty is None or "15" not in net_qty.get("extracted_value", "")
+
+

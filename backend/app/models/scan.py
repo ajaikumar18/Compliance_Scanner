@@ -54,6 +54,8 @@ class Scan(Base):
         server_default=func.now(),
         nullable=False,
     )
+    gtin: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
+    batch_code: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
 
     # Relationships
     product: Mapped["Product"] = relationship(  # noqa: F821

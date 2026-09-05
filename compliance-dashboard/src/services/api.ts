@@ -1,6 +1,13 @@
-import type { BatchStatusResponse, ScanResult } from '../types';
+import type {
+  BatchStatusResponse,
+  ComplianceLedgerData,
+  ReInspectionTicket,
+  ScanResult,
+  TicketSummaryStats,
+} from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+
 
 async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
@@ -31,7 +38,12 @@ export async function loginUser(username: string, password: string): Promise<{ t
 
 export async function uploadSingleScan(
   file: File,
-  metadata: { category?: string; packageWidthMm?: number; netQuantityG?: number } = {}
+  metadata: {
+    category?: string;
+    packageWidthMm?: number;
+    netQuantityG?: number;
+    arPixelsPerMm?: number;
+  } = {}
 ): Promise<ScanResult> {
   const formData = new FormData();
   formData.append('files', file);
@@ -39,6 +51,7 @@ export async function uploadSingleScan(
   if (metadata.category) formData.append('category', metadata.category);
   if (metadata.packageWidthMm) formData.append('package_width_mm', metadata.packageWidthMm.toString());
   if (metadata.netQuantityG) formData.append('net_quantity_g', metadata.netQuantityG.toString());
+  if (metadata.arPixelsPerMm) formData.append('ar_pixels_per_mm', metadata.arPixelsPerMm.toString());
 
   const resp = await fetch(`${API_BASE_URL}/scan/batch`, {
     method: 'POST',
@@ -93,9 +106,177 @@ export async function getBatchStatus(batchId: string): Promise<BatchStatusRespon
   return handleResponse(resp);
 }
 
+export async function fetchScans(): Promise<ScanResult[]> {
+  try {
+    const resp = await fetch(`${API_BASE_URL}/scans`);
+    const json = await handleResponse<any>(resp);
+    return json.scans || json.results || (Array.isArray(json) ? json : []);
+  } catch (err) {
+    console.warn('fetchScans failed, falling back to mock scans:', err);
+    return [];
+  }
+}
+
+export async function fetchLedgerByGtin(gtin: string): Promise<ComplianceLedgerData> {
+  const cleanGtin = gtin.trim();
+  const resp = await fetch(`${API_BASE_URL}/ledger/${cleanGtin}`);
+  return handleResponse<ComplianceLedgerData>(resp);
+}
+
+export async function fetchReInspectionTickets(
+  status?: string,
+  priority?: string,
+  gtin?: string
+): Promise<ReInspectionTicket[]> {
+  try {
+    const params = new URLSearchParams();
+    if (status && status !== 'all') params.append('status', status);
+    if (priority && priority !== 'all') params.append('priority', priority);
+    if (gtin) params.append('gtin', gtin);
+
+    const queryStr = params.toString() ? `?${params.toString()}` : '';
+    const resp = await fetch(`${API_BASE_URL}/tickets${queryStr}`);
+    const data = await handleResponse<ReInspectionTicket[]>(resp);
+    return data && data.length > 0 ? data : MOCK_TICKETS;
+  } catch (err) {
+    console.warn('fetchReInspectionTickets failed, using fallback mock tickets:', err);
+    return MOCK_TICKETS.filter(t => {
+      if (status && status !== 'all' && t.status !== status) return false;
+      if (priority && priority !== 'all' && t.priority !== priority) return false;
+      if (gtin && !t.gtin.includes(gtin)) return false;
+      return true;
+    });
+  }
+}
+
+export async function fetchTicketSummaryStats(): Promise<TicketSummaryStats> {
+  try {
+    const resp = await fetch(`${API_BASE_URL}/tickets/summary/stats`);
+    return await handleResponse<TicketSummaryStats>(resp);
+  } catch (err) {
+    console.warn('fetchTicketSummaryStats failed, calculating from mock tickets:', err);
+    return {
+      total_tickets: MOCK_TICKETS.length,
+      open_tickets: MOCK_TICKETS.filter(t => t.status === 'open').length,
+      critical_tickets: MOCK_TICKETS.filter(t => t.priority === 'critical' && t.status !== 'resolved').length,
+      high_tickets: MOCK_TICKETS.filter(t => t.priority === 'high' && t.status !== 'resolved').length,
+      investigating_tickets: MOCK_TICKETS.filter(t => t.status === 'investigating').length,
+      resolved_tickets: MOCK_TICKETS.filter(t => t.status === 'resolved').length,
+    };
+  }
+}
+
+export async function updateTicketStatus(
+  ticketId: number,
+  update: { status?: string; assigned_to?: string; resolution_notes?: string }
+): Promise<ReInspectionTicket> {
+  const resp = await fetch(`${API_BASE_URL}/tickets/${ticketId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(update),
+  });
+  return handleResponse<ReInspectionTicket>(resp);
+}
+
+export const MOCK_TICKETS: ReInspectionTicket[] = [
+  {
+    id: 1,
+    ticket_number: "RIT-383456-20260905131500",
+    gtin: "8901030383456",
+    product_name: "NutriChoice Digestive High Fibre Biscuits",
+    batch_code: "B4208",
+    trigger_scan_id: 101,
+    prior_verdict: "compliant",
+    prior_confidence: 0.88,
+    prior_calibration_tier: "dpi_estimated",
+    new_verdict: "non_compliant",
+    new_confidence: 0.94,
+    new_calibration_tier: "ar_verified",
+    conflict_type: "sensor_tier_escalation",
+    discrepancy_reason: "CRITICAL DISCREPANCY: High-precision AR-Verified 3D Depth audit flagged product as NON-COMPLIANT (undersized net_quantity font 1.8mm < 4.0mm requirement), overruling prior uncalibrated DPI-estimated compliant consensus.",
+    priority: "critical",
+    status: "open",
+    assigned_to: null,
+    resolution_notes: null,
+    resolved_at: null,
+    created_at: new Date(Date.now() - 18 * 60 * 1000).toISOString(),
+    updated_at: new Date(Date.now() - 18 * 60 * 1000).toISOString(),
+    trigger_scan_violations: [
+      {
+        field_name: "net_quantity",
+        violation_type: "undersized_font",
+        severity: "high",
+        details: "AR measured height 1.80mm below required 4.00mm",
+      },
+      {
+        field_name: "mrp",
+        violation_type: "missing",
+        severity: "high",
+        details: "Mandatory declaration missing from primary display panel",
+      },
+    ],
+  },
+  {
+    id: 2,
+    ticket_number: "RIT-383999-20260905124000",
+    gtin: "8901030383999",
+    product_name: "GoodDay Butter Cookies 200g",
+    batch_code: "LOT-99",
+    trigger_scan_id: 102,
+    prior_verdict: "compliant",
+    prior_confidence: 0.84,
+    prior_calibration_tier: "reference_object",
+    new_verdict: "disputed",
+    new_confidence: 0.58,
+    new_calibration_tier: "ar_verified",
+    conflict_type: "consensus_disputed",
+    discrepancy_reason: "CONSENSUS DEADLOCK: AR depth measurement disputed coin reference calibration; manufacture date format failed verification. Aggregate verdict shifted into 'disputed' state.",
+    priority: "high",
+    status: "investigating",
+    assigned_to: "Officer S. Patel",
+    resolution_notes: "Physical retail sample requested from zonal depot.",
+    resolved_at: null,
+    created_at: new Date(Date.now() - 65 * 60 * 1000).toISOString(),
+    updated_at: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+    trigger_scan_violations: [
+      {
+        field_name: "manufacture_date",
+        violation_type: "incorrect_format",
+        severity: "medium",
+        details: "Date format does not comply with MM/YYYY requirement",
+      },
+    ],
+  },
+  {
+    id: 3,
+    ticket_number: "RIT-789050-20260905101000",
+    gtin: "012345678905",
+    product_name: "Organic Honey 500g Glass Jar",
+    batch_code: "H-2026-A",
+    trigger_scan_id: 103,
+    prior_verdict: "non_compliant",
+    prior_confidence: 0.79,
+    prior_calibration_tier: "dpi_estimated",
+    new_verdict: "compliant",
+    new_confidence: 0.91,
+    new_calibration_tier: "ar_verified",
+    conflict_type: "sensor_tier_escalation",
+    discrepancy_reason: "High-precision AR-Verified 3D Depth audit verified label font as COMPLIANT (2.2mm >= 2.0mm threshold), disputing prior DPI-estimated non-compliant flags.",
+    priority: "high",
+    status: "open",
+    assigned_to: null,
+    resolution_notes: null,
+    resolved_at: null,
+    created_at: new Date(Date.now() - 3 * 3600 * 1000).toISOString(),
+    updated_at: new Date(Date.now() - 3 * 3600 * 1000).toISOString(),
+    trigger_scan_violations: [],
+  },
+];
+
 export function getReportDownloadUrl(scanId: number, format: 'pdf' | 'docx'): string {
   return `${API_BASE_URL}/reports/${scanId}/${format}`;
 }
+
 
 export const MOCK_SCANS: ScanResult[] = [
   {

@@ -23,4 +23,12 @@ celery_app.conf.update(
     task_track_started=True,
     task_time_limit=3600,       # 1 hour max task time
     result_expires=86400,        # 24 hours result expiration
+    broker_connection_retry_on_startup=False,
+    broker_connection_max_retries=0,
+    result_backend_transport_options={
+        "max_retries": 0,
+        "interval_start": 0,
+        "interval_step": 0,
+        "interval_max": 0,
+    },
 )

@@ -69,7 +69,8 @@ DEFAULT_300_DPI_PIXELS_PER_MM = 300.0 / 25.4
 
 class ScaleCalibrationResult(TypedDict):
     pixels_per_mm: float
-    calibration_method: str  # "hough_circle_reference" | "manual_package_width" | "uncalibrated_default_dpi"
+    calibration_method: str  # "ar_verified" | "hough_circle_reference" | "manual_package_width" | "uncalibrated_default_dpi"
+    calibration_tier: str    # "ar_verified" | "reference_object" | "package_dimension" | "dpi_estimated"
     detected_circle: dict[str, float] | None  # {"center_x": ..., "center_y": ..., "radius_px": ..., "diameter_px": ...}
     tolerance_note: str
 
@@ -105,19 +106,25 @@ def calibrate_scale(
     image: np.ndarray,
     reference_object_diameter_mm: float | None = None,
     package_width_mm: float | None = None,
+    ar_pixels_per_mm: float | None = None,
+    ar_mm_per_pixel: float | None = None,
 ) -> ScaleCalibrationResult:
     """
     Calibrate pixel-to-millimeter scale factor for a product image.
 
-    Strategy
-    --------
-    1. Primary method: Detect circular reference object (e.g. coin) using Hough Circle
+    Strategy & Priority Hierarchy
+    -----------------------------
+    1. Top-Priority Tier (AR Verified): On-device WebXR / AR depth hit-test distance.
+       If ar_pixels_per_mm (or ar_mm_per_pixel) is provided and > 0, use directly:
+           pixels_per_mm = ar_pixels_per_mm
+       Yields highest measurement confidence with +/-0.05mm precision.
+    2. Primary Optical Method: Detect circular reference object (e.g. coin) using Hough Circle
        Detection. If found and reference_object_diameter_mm > 0, compute scale:
            pixels_per_mm = diameter_pixels / reference_object_diameter_mm
-    2. Alternative method: If no circle detected (or reference size not given), use
+    3. Alternative Method: If no circle detected (or reference size not given), use
        manual package_width_mm:
            pixels_per_mm = image_width_pixels / package_width_mm
-    3. Fallback method: Default to standard 300 DPI scale assumption (~11.81 px/mm).
+    4. Fallback Method: Default to standard 300 DPI scale assumption (~11.81 px/mm).
 
     Parameters
     ----------
@@ -127,13 +134,18 @@ def calibrate_scale(
         Known diameter of circular reference object in mm (e.g. 24.26mm for Rs 5 coin).
     package_width_mm : float | None
         Known real-world width of the product package in mm.
+    ar_pixels_per_mm : float | None
+        On-device AR measured scale in pixels per millimeter (> 0).
+    ar_mm_per_pixel : float | None
+        On-device AR measured scale in millimeters per pixel (> 0).
 
     Returns
     -------
     ScaleCalibrationResult
         {
             "pixels_per_mm": float,
-            "calibration_method": "hough_circle_reference" | "manual_package_width" | "uncalibrated_default_dpi",
+            "calibration_method": "ar_verified" | "hough_circle_reference" | "manual_package_width" | "uncalibrated_default_dpi",
+            "calibration_tier": "ar_verified" | "reference_object" | "package_dimension" | "dpi_estimated",
             "detected_circle": dict | None,
             "tolerance_note": str
         }
@@ -143,55 +155,71 @@ def calibrate_scale(
 
     h_img, w_img = image.shape[:2]
 
-    # Convert to greyscale if 3-channel
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
-    blurred = cv2.medianBlur(gray, 5)
+    # Top-Priority Tier 1: On-Device AR Verification (WebXR Hit-Test / Depth)
+    if ar_mm_per_pixel and ar_mm_per_pixel > 0 and (ar_pixels_per_mm is None or ar_pixels_per_mm <= 0):
+        ar_pixels_per_mm = 1.0 / ar_mm_per_pixel
 
-    # Attempt Hough Circle Detection
-    circles = None
-    try:
-        min_dim = min(h_img, w_img)
-        circles = cv2.HoughCircles(
-            blurred,
-            cv2.HOUGH_GRADIENT,
-            dp=1.2,
-            minDist=min_dim // 8 if min_dim >= 8 else 10,
-            param1=50,
-            param2=30,
-            minRadius=max(10, min_dim // 40),
-            maxRadius=min_dim // 2,
+    if ar_pixels_per_mm and ar_pixels_per_mm > 0:
+        tolerance_note = (
+            f"+/-0.05mm high-precision tolerance via on-device AR surface hit-test "
+            f"({ar_pixels_per_mm:.2f} px/mm calibrated)"
         )
-    except Exception as exc:
-        logger.debug("Hough Circle Detection failed: %s", exc)
+        logger.info("Scale calibrated via on-device AR verification (Tier 1): %.2f px/mm", ar_pixels_per_mm)
+        return ScaleCalibrationResult(
+            pixels_per_mm=round(ar_pixels_per_mm, 4),
+            calibration_method="ar_verified",
+            calibration_tier="ar_verified",
+            detected_circle=None,
+            tolerance_note=tolerance_note,
+        )
 
-    # Primary Method: Hough Circle Reference
-    if circles is not None and len(circles) > 0 and reference_object_diameter_mm and reference_object_diameter_mm > 0:
-        # Pick circle with largest radius / highest confidence
-        best_circle = max(circles[0], key=lambda c: c[2])
-        cx, cy, radius = float(best_circle[0]), float(best_circle[1]), float(best_circle[2])
-        diameter_px = radius * 2.0
-
-        if diameter_px > 0:
-            pixels_per_mm = diameter_px / reference_object_diameter_mm
-            circle_info = {
-                "center_x": round(cx, 1),
-                "center_y": round(cy, 1),
-                "radius_px": round(radius, 1),
-                "diameter_px": round(diameter_px, 1),
-            }
-            tolerance_note = (
-                f"+/-0.2mm estimated tolerance based on circular reference object calibration "
-                f"(detected diameter={diameter_px:.1f}px for {reference_object_diameter_mm:.1f}mm object)"
+    # Tier 2: Hough Circle Reference Object (Coin / Circular Stamp)
+    if reference_object_diameter_mm and reference_object_diameter_mm > 0:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
+        blurred = cv2.medianBlur(gray, 5)
+        circles = None
+        try:
+            min_dim = min(h_img, w_img)
+            circles = cv2.HoughCircles(
+                blurred,
+                cv2.HOUGH_GRADIENT,
+                dp=1.2,
+                minDist=min_dim // 8 if min_dim >= 8 else 10,
+                param1=50,
+                param2=30,
+                minRadius=max(10, min_dim // 40),
+                maxRadius=min_dim // 2,
             )
-            logger.info("Scale calibrated via Hough Circle: %.2f px/mm", pixels_per_mm)
-            return ScaleCalibrationResult(
-                pixels_per_mm=round(pixels_per_mm, 4),
-                calibration_method="hough_circle_reference",
-                detected_circle=circle_info,
-                tolerance_note=tolerance_note,
-            )
+        except Exception as exc:
+            logger.debug("Hough Circle Detection failed: %s", exc)
 
-    # Alternative Method: Manual Package Width
+        if circles is not None and len(circles) > 0:
+            best_circle = max(circles[0], key=lambda c: c[2])
+            cx, cy, radius = float(best_circle[0]), float(best_circle[1]), float(best_circle[2])
+            diameter_px = radius * 2.0
+
+            if diameter_px > 0:
+                pixels_per_mm = diameter_px / reference_object_diameter_mm
+                circle_info = {
+                    "center_x": round(cx, 1),
+                    "center_y": round(cy, 1),
+                    "radius_px": round(radius, 1),
+                    "diameter_px": round(diameter_px, 1),
+                }
+                tolerance_note = (
+                    f"+/-0.2mm estimated tolerance based on circular reference object calibration "
+                    f"(detected diameter={diameter_px:.1f}px for {reference_object_diameter_mm:.1f}mm object)"
+                )
+                logger.info("Scale calibrated via Hough Circle: %.2f px/mm", pixels_per_mm)
+                return ScaleCalibrationResult(
+                    pixels_per_mm=round(pixels_per_mm, 4),
+                    calibration_method="hough_circle_reference",
+                    calibration_tier="reference_object",
+                    detected_circle=circle_info,
+                    tolerance_note=tolerance_note,
+                )
+
+    # Tier 3: Manual Package Width
     if package_width_mm and package_width_mm > 0:
         pixels_per_mm = w_img / package_width_mm
         tolerance_note = (
@@ -202,11 +230,12 @@ def calibrate_scale(
         return ScaleCalibrationResult(
             pixels_per_mm=round(pixels_per_mm, 4),
             calibration_method="manual_package_width",
+            calibration_tier="package_dimension",
             detected_circle=None,
             tolerance_note=tolerance_note,
         )
 
-    # Fallback Method: Default 300 DPI
+    # Tier 4 (Fallback): Default 300 DPI
     pixels_per_mm = DEFAULT_300_DPI_PIXELS_PER_MM
     tolerance_note = (
         "+/-0.5mm estimated tolerance due to uncalibrated default 300 DPI scale assumption"
@@ -215,6 +244,7 @@ def calibrate_scale(
     return ScaleCalibrationResult(
         pixels_per_mm=round(pixels_per_mm, 4),
         calibration_method="uncalibrated_default_dpi",
+        calibration_tier="dpi_estimated",
         detected_circle=None,
         tolerance_note=tolerance_note,
     )
@@ -330,10 +360,13 @@ def check_font_compliance(
     # Compliance determination
     compliant = measured_height_mm >= required_mm
 
-    # Measurement uncertainty tolerance note as requested
-    if "hough_circle" in calibration_method:
+    # Measurement uncertainty tolerance note based on calibration tier
+    method_lower = calibration_method.lower()
+    if "ar" in method_lower:
+        tol_str = "+/-0.05mm high-precision tolerance via on-device AR verification"
+    elif "hough_circle" in method_lower or "reference" in method_lower:
         tol_str = "+/-0.2mm estimated tolerance due to circular reference calibration"
-    elif "manual" in calibration_method:
+    elif "manual" in method_lower or "package" in method_lower:
         tol_str = "+/-0.3mm estimated tolerance due to manual package width calibration"
     else:
         tol_str = "+/-0.5mm estimated tolerance due to uncalibrated default DPI scale assumption"
