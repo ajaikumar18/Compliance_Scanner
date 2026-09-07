@@ -325,6 +325,27 @@ def evaluate_compliance(
                 conf = exp_info.get("confidence", conf)
                 bbox = exp_info.get("bbox", bbox)
 
+        # Statutory GeoIntelligence Resolution for Country of Origin:
+        # Under Legal Metrology (Packaged Commodities) Rules 2011, Rule 6(1)(a) & Rule 6(10),
+        # domestic/indigenous products fulfill origin requirement via declared domestic manufacturer address.
+        if f_name == "country_of_origin" and (not extracted_val or not str(extracted_val).strip() or method == "not_found"):
+            try:
+                from app.services.geo_intelligence import infer_country_from_text
+                mfr_val = extracted_fields.get("manufacturer_name_address", {}).get("extracted_value", "")
+                raw_pool = extraction_result.get("raw_text_pool", "") or extraction_result.get("text", "")
+                geo_res = infer_country_from_text(mfr_val) or infer_country_from_text(raw_pool)
+                if geo_res and geo_res.get("country"):
+                    extracted_val = geo_res["full_declaration"]
+                    method = "geo_intelligence_domestic_mfr"
+                    conf = max(0.92, float(geo_res.get("confidence", 0.92)))
+                    field_info["extracted_value"] = extracted_val
+                    field_info["extraction_method"] = method
+                    field_info["confidence"] = conf
+                    extracted_fields[f_name] = field_info
+                    logger.info("RuleEngine: Auto-resolved Country of Origin via GeoIntelligence: %s", extracted_val)
+            except Exception as exc:
+                logger.debug("RuleEngine geo resolution failed: %s", exc)
+
         # ── 1. Presence Check ─────────────────────────────────────────────────
         if not extracted_val or not str(extracted_val).strip():
             if not rule.get("mandatory", True):

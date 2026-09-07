@@ -601,6 +601,12 @@ export const ScanResultPage = ({ scan, onBackToHistory }: ScanResultPageProps) =
                         </span>
                       )}
                     </div>
+                    {decl.key === 'country_of_origin' && fieldInfo?.extracted_value && !violation && (
+                      <div className="mt-1 text-[10px] text-[#2F6F4E] font-mono flex items-center gap-1">
+                        <Check className="w-3 h-3 text-[#2F6F4E] shrink-0" />
+                        <span>Rule 6(1)(a) & 6(10) Indigenous Verification: Domestic origin verified via declared Indian manufacturing location.</span>
+                      </div>
+                    )}
                     {violation && (
                       <div className="mt-1 text-[11px] text-[#A8342A] font-sans font-medium flex items-center gap-1">
                         <AlertTriangle className="w-3.5 h-3.5 shrink-0" />

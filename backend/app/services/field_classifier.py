@@ -299,15 +299,23 @@ _FIELD_VALIDATORS: dict[str, list[dict[str, Any]]] = {
         {
             "name": "coo_india_keyword",
             "pattern": re.compile(r"\b(?:India|Republic\s+of\s+India)\b", re.IGNORECASE),
-            "confidence": 0.80,
+            "confidence": 0.88,
         },
         {
             "name": "coo_indian_domestic_pincode",
             "pattern": re.compile(
-                r"\b(?:MUMBAI|DELHI|BANGALORE|HYDERABAD|CHENNAI|KOLKATA|PUNE|AHMEDABAD|TS|TN|MH|KA|UP|MP|GJ|WB)[^\w\d\n\r]*[-–]?\s*\d{6}\b",
+                r"\b(?:MUMBAI|DELHI|BANGALORE|HYDERABAD|CHENNAI|KOLKATA|PUNE|AHMEDABAD|HARYANA|SONIPAT|BARHI|GURGAON|FARIDABAD|NOIDA|GHAZIABAD|PUNJAB|GUJARAT|MAHARASHTRA|KARNATAKA|TAMIL\s*NADU|KERALA|RAJASTHAN|BIHAR|ODISHA|ASSAM|UTTARAKHAND|TS|TN|MH|KA|UP|MP|GJ|WB|HR|PB|RJ|AP|KL|CH|DL)[^\w\d\n\r]*[-–]?\s*\d{6}\b",
                 re.IGNORECASE,
             ),
-            "confidence": 0.82,
+            "confidence": 0.90,
+        },
+        {
+            "name": "coo_indian_state_name",
+            "pattern": re.compile(
+                r"\b(?:Haryana|Punjab|Maharashtra|Karnataka|Gujarat|Tamil\s*Nadu|Kerala|Rajasthan|Uttar\s*Pradesh|Madhya\s*Pradesh|Andhra\s*Pradesh|Telangana|West\s*Bengal|Odisha|Bihar|Jharkhand|Assam|Himachal\s*Pradesh|Uttarakhand|Goa|Delhi)\b",
+                re.IGNORECASE,
+            ),
+            "confidence": 0.85,
         },
     ],
 }
@@ -928,7 +936,7 @@ class LaptopLayoutClassifier:
                     co_name = m_co2.group(1).strip()
 
             m_addr = re.search(
-                r"(\d+[\w\s\,\.\-]+\b(?:Industrial|Area|Estate|Road|Street|Marg|Nagar|Noida|Delhi|Mumbai|Chennai|Pune|Hyderabad|Bangalore|UP|TS|TN|MH|PIN|\d{6})\b[^\n\r]*)",
+                r"((?:At:?\s*)?(?:Plot\s+No\.?|\d+)[^\n\r]*(?:Industrial|Area|Estate|Road|Street|Marg|Nagar|Barhi|Sonipat|Haryana|Noida|Delhi|Mumbai|Chennai|Pune|Hyderabad|Bangalore|UP|TS|TN|MH|HR|PB|GJ|KA|KL|RJ|MP|PIN|\d{6})[^\n\r]*)",
                 text,
                 re.IGNORECASE,
             )
@@ -947,9 +955,16 @@ class LaptopLayoutClassifier:
             m_coo = re.search(r"(?:country\s+of\s+origin|made\s+in|product\s+of)[\s:\-]*([A-Za-z\s]+)", text, re.IGNORECASE)
             if m_coo:
                 return f"Country of Origin: {m_coo.group(1).strip()}"
+            try:
+                from app.services.geo_intelligence import infer_country_from_text
+                geo_res = infer_country_from_text(text)
+                if geo_res and geo_res.get("full_declaration"):
+                    return geo_res["full_declaration"]
+            except Exception:
+                pass
             if "india" in text.lower():
                 return "Country of Origin: India"
-            if re.search(r"\b(?:MUMBAI|DELHI|BANGALORE|HYDERABAD|CHENNAI|KOLKATA|PUNE|AHMEDABAD|TS|TN|MH|KA|UP|MP|GJ|WB)[^\w\d\n\r]*[-–]?\s*\d{6}\b", text, re.IGNORECASE):
+            if re.search(r"\b(?:MUMBAI|DELHI|BANGALORE|HYDERABAD|CHENNAI|KOLKATA|PUNE|AHMEDABAD|HARYANA|SONIPAT|BARHI|GURGAON|FARIDABAD|NOIDA|GHAZIABAD|PUNJAB|GUJARAT|MAHARASHTRA|KARNATAKA|TAMIL\s*NADU|KERALA|RAJASTHAN|TS|TN|MH|KA|UP|MP|GJ|WB|HR|PB)[^\w\d\n\r]*[-–]?\s*\d{6}\b", text, re.IGNORECASE):
                 return "Country of Origin: India (Domestic Origin)"
 
         elif field_name == "consumer_care_details":
@@ -1097,6 +1112,55 @@ class LaptopLayoutClassifier:
                     cb for cb in classified_blocks
                     if (cb.get("field") if isinstance(cb, dict) else getattr(cb, "field", None)) != "expiry_date"
                 ]
+
+        # ── GeoIntelligence Inference for Country of Origin ───────────────
+        # Under Legal Metrology (Packaged Commodities) Rules 2011 Rule 6(1)(a) & Rule 6(10),
+        # domestic/indigenous products declare Country of Origin through the domestic manufacturer address.
+        if "country_of_origin" not in extracted_fields or "country_of_origin" in failed_fields:
+            try:
+                from app.services.geo_intelligence import infer_country_from_text
+                mfr_field = extracted_fields.get("manufacturer_name_address")
+                mfr_text = mfr_field.get("extracted_value", "") if mfr_field else ""
+                geo_res = infer_country_from_text(mfr_text) or infer_country_from_text(raw_text_pool)
+                if geo_res and geo_res.get("country"):
+                    geo_bbox = mfr_field.get("bbox") if mfr_field else [20, 20, 180, 25]
+                    # Look for token containing state or country or pin to get a more specific bbox
+                    for tok in tokens:
+                        t_low = tok.text.lower()
+                        if (
+                            "haryana" in t_low or "sonipat" in t_low or "barhi" in t_low or
+                            "india" in t_low or "131001" in t_low or
+                            (geo_res.get("inferred_from", "").lower() in t_low) or
+                            geo_res["country"].lower() in t_low
+                        ):
+                            geo_bbox = tok.bbox
+                            break
+
+                    extracted_fields["country_of_origin"] = {
+                        "field_name": "country_of_origin",
+                        "extracted_value": geo_res["full_declaration"],
+                        "confidence": max(0.92, float(geo_res.get("confidence", 0.92))),
+                        "bbox": geo_bbox,
+                        "pattern_matched": f"geo_intelligence_{geo_res.get('evidence_type', 'location')}",
+                        "engine_used": "geo_intelligence",
+                    }
+                    if "country_of_origin" in failed_fields:
+                        failed_fields.remove("country_of_origin")
+                    classified_blocks.append(
+                        ClassifiedBlock(
+                            text=geo_res["full_declaration"],
+                            bbox=geo_bbox,
+                            confidence=max(0.92, float(geo_res.get("confidence", 0.92))),
+                            engine_used="geo_intelligence",
+                            field="country_of_origin",
+                            match_confidence=max(0.92, float(geo_res.get("confidence", 0.92))),
+                            pattern_matched=f"geo_intelligence_{geo_res.get('evidence_type', 'location')}",
+                            requires_genai=False,
+                        )
+                    )
+                    logger.info("LaptopLayoutClassifier: Country of Origin deduced via GeoIntelligence: %s", geo_res["full_declaration"])
+            except Exception as exc:
+                logger.debug("GeoIntelligence inference in classifier failed: %s", exc)
 
         # Build unmatched blocks for backward compatibility:
         # Blocks with match_confidence < GENAI_FALLBACK_THRESHOLD remain in unmatched

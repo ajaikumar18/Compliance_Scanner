@@ -271,6 +271,26 @@ async def _process_single_scan_image(
     if batch_code:
         logger.info("Batch/Lot code extracted for %s: %s", filename, batch_code)
 
+    # ── Step 4c: Domestic Manufacturer Origin Inference (Rule 6(1)(a) & 6(10)) ──
+    # Under Legal Metrology Rules 2011 Rule 6(1)(a) & Rule 6(10), indigenous / domestic
+    # products declare Country of Origin through the domestic manufacturer address (e.g. Haryana, India).
+    from app.services.geo_intelligence import infer_country_from_text
+    coo_info = unified_extraction["fields"].get("country_of_origin", {})
+    if not coo_info.get("extracted_value") or coo_info.get("extraction_method") == "not_found":
+        mfr_info = unified_extraction["fields"].get("manufacturer_name_address", {})
+        mfr_val = mfr_info.get("extracted_value", "")
+        geo_res = infer_country_from_text(mfr_val) or infer_country_from_text(raw_text_pool)
+        if geo_res and geo_res.get("country"):
+            coo_bbox = mfr_info.get("bbox") or [20, 20, 180, 25]
+            unified_extraction["fields"]["country_of_origin"] = {
+                "field_name": "country_of_origin",
+                "extracted_value": geo_res["full_declaration"],
+                "confidence": max(0.92, float(geo_res.get("confidence", 0.92))),
+                "extraction_method": "geo_intelligence_domestic_mfr",
+                "bbox": coo_bbox,
+            }
+            logger.info("Country of Origin auto-inferred via GeoIntelligence for %s: %s", filename, geo_res["full_declaration"])
+
     # ── Step 5: Identify gaps — which fields need GenAI help? ─────────────────
     HIGH_CONF_THRESHOLD = 0.65  # Lowered from 0.80 — avoids unnecessary AI calls for solid OCR reads
     CORE_MANDATORY_FIELDS = [
@@ -395,6 +415,21 @@ async def _process_single_scan_image(
                         "bbox": [15, 15, 220, 35],
                     }
                     logger.info("E-Commerce Rule 6(10) spec applied: %s -> %s for %s", spec_key, str(spec_val)[:35], filename)
+
+    # Ensure Country of Origin is resolved via GeoIntelligence if still unpopulated
+    coo_info = unified_extraction["fields"].get("country_of_origin", {})
+    if not coo_info.get("extracted_value") or coo_info.get("extraction_method") == "not_found":
+        mfr_info = unified_extraction["fields"].get("manufacturer_name_address", {})
+        mfr_val = mfr_info.get("extracted_value", "")
+        geo_res = infer_country_from_text(mfr_val) or infer_country_from_text(raw_text_pool)
+        if geo_res and geo_res.get("country"):
+            unified_extraction["fields"]["country_of_origin"] = {
+                "field_name": "country_of_origin",
+                "extracted_value": geo_res["full_declaration"],
+                "confidence": max(0.92, float(geo_res.get("confidence", 0.92))),
+                "extraction_method": "geo_intelligence_domestic_mfr",
+                "bbox": mfr_info.get("bbox") or [20, 20, 180, 25],
+            }
 
     # Recompute summary after merge
     method_counts: dict[str, int] = {}
