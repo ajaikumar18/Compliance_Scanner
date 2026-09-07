@@ -51,6 +51,16 @@ async def lifespan(app: FastAPI):
 
     asyncio.create_task(_warmup_paddle())
 
+    # ── Pre-warm Multilingual TTS Cache in background ────────────────────────
+    async def _warmup_tts():
+        try:
+            from app.routers.intelligence import warmup_tts_cache
+            await asyncio.to_thread(warmup_tts_cache)
+        except Exception as exc:
+            logger.warning("⚠️  TTS warm-up failed (non-fatal): %s", exc)
+
+    asyncio.create_task(_warmup_tts())
+
     yield  # ← app is running
 
     logger.info("🛑  Shutting down %s", settings.APP_NAME)

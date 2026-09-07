@@ -62,14 +62,14 @@ class SpeechService {
 
     const code = langCode.toLowerCase().split('-')[0];
 
-    // Priority prefixes for each supported language
+    // Priority prefixes and voice names for each supported language
     const langMap: Record<string, string[]> = {
-      en: ['en-in', 'en-us', 'en-gb', 'en'],
-      hi: ['hi-in', 'hi', 'hindi'],
-      ta: ['ta-in', 'ta', 'tamil'],
-      te: ['te-in', 'te', 'telugu'],
-      kn: ['kn-in', 'kn', 'kannada'],
-      ml: ['ml-in', 'ml', 'malayalam'],
+      en: ['en-in', 'en-us', 'en-gb', 'en', 'george', 'susan', 'hazel', 'david', 'zira'],
+      hi: ['hi-in', 'hi', 'hindi', 'madhur', 'swara', 'kalpana', 'hemant'],
+      ta: ['ta-in', 'ta', 'tamil', 'valluvar', 'pallavi'],
+      te: ['te-in', 'te', 'telugu', 'mohan', 'shruti'],
+      kn: ['kn-in', 'kn', 'kannada', 'gagan', 'sapna'],
+      ml: ['ml-in', 'ml', 'malayalam', 'midhun', 'sobhana'],
     };
 
     const targetPrefixes = langMap[code] || [code];
@@ -88,15 +88,14 @@ class SpeechService {
     if (code === 'en') {
       const enVoice = voices.find(v => v.lang.toLowerCase().startsWith('en'));
       if (enVoice) return enVoice;
+      const indianEnglish = voices.find(v => v.lang.toLowerCase().replace('_', '-').includes('en-in'));
+      if (indianEnglish) return indianEnglish;
+      return voices.find(v => v.default) || voices[0] || null;
     }
 
-    // 3. If Indic language, try to find an Indian English voice (often installed on Windows in India)
-    const indianEnglish = voices.find(v => v.lang.toLowerCase().replace('_', '-').includes('en-in'));
-    if (indianEnglish) return indianEnglish;
-
-    // 4. Default system voice
-    const defaultVoice = voices.find(v => v.default) || voices[0];
-    return defaultVoice || null;
+    // 3. For non-English Indic languages: DO NOT fallback to an English voice!
+    // An English voice speaking Tamil or Hindi produces total silence or garbled phonemes.
+    return null;
   }
 
   public getState(): SpeechState {
@@ -182,15 +181,27 @@ class SpeechService {
     this.currentLang = lang;
     const langCode = lang.split('-')[0].toLowerCase();
 
-    // Tier 1: Try backend high-fidelity audio stream via fetch (with timeout)
+    // Tier 1: Try backend high-fidelity audio stream via fetch (with generous 20s timeout)
     try {
       this.abortController = new AbortController();
       const timeoutId = setTimeout(() => {
         this.abortController?.abort();
-      }, 5000);
+      }, 20000);
 
-      // Truncate to 600 characters max for instantaneous speech response
-      const ttsText = cleanText.length > 600 ? cleanText.slice(0, 600) + '...' : cleanText;
+      // Truncate to ~350 chars for speech synthesis (first 2-3 sentences) to ensure sub-2s generation
+      let ttsText = cleanText;
+      if (cleanText.length > 350) {
+        const slice = cleanText.slice(0, 350);
+        const lastPunct = Math.max(
+          slice.lastIndexOf('.'),
+          slice.lastIndexOf('?'),
+          slice.lastIndexOf('!'),
+          slice.lastIndexOf('।'),
+          slice.lastIndexOf('\n')
+        );
+        ttsText = lastPunct > 80 ? slice.slice(0, lastPunct + 1) : slice + '...';
+      }
+
       const url = `${API_BASE_URL}/tts?text=${encodeURIComponent(ttsText)}&lang=${langCode}`;
 
       const response = await fetch(url, {
@@ -205,6 +216,7 @@ class SpeechService {
           const blobUrl = URL.createObjectURL(blob);
           this.currentAudioUrl = blobUrl;
           const audio = new Audio(blobUrl);
+          audio.preload = 'auto';
           this.currentAudio = audio;
 
           audio.onplay = () => {
@@ -223,17 +235,24 @@ class SpeechService {
             this.speakWithBrowserSynth(cleanText, langCode, callbacks);
           };
 
-          await audio.play();
-          return;
+          try {
+            await audio.play();
+            return;
+          } catch (playErr: any) {
+            console.warn('Audio play() promise rejected:', playErr);
+            this.cleanupAudio();
+            this.speakWithBrowserSynth(cleanText, langCode, callbacks);
+            return;
+          }
         }
       }
     } catch (err: any) {
       if (err?.name !== 'AbortError') {
-        console.warn('Backend TTS not reached, using browser speech synthesis fallback:', err?.message || err);
+        console.warn('Backend TTS not reached, attempting fallback:', err?.message || err);
       }
     }
 
-    // Tier 2: Fallback to Browser SpeechSynthesis
+    // Tier 2: Fallback to Browser SpeechSynthesis (if supported voice exists)
     this.speakWithBrowserSynth(cleanText, langCode, callbacks);
   }
 
@@ -264,17 +283,24 @@ class SpeechService {
     // Give browser speech synthesis queue 50ms to settle after cancellation
     setTimeout(() => {
       try {
+        const bestVoice = this.getBestVoiceForLanguage(langCode);
+        if (!bestVoice && langCode !== 'en') {
+          console.warn(`No native browser voice available for language '${langCode}' and backend TTS was unreachable.`);
+          this.emitState('idle');
+          callbacks?.onError?.(new Error(`No voice available for language ${langCode}`));
+          return;
+        }
+
         const utterance = new SpeechSynthesisUtterance(text);
         this.currentUtterance = utterance;
 
-        const bestVoice = this.getBestVoiceForLanguage(langCode);
         if (bestVoice) {
           utterance.voice = bestVoice;
           // CRITICAL: Set utterance.lang to match the chosen voice's lang.
           // This prevents the browser from throwing "language-unavailable" error.
           utterance.lang = bestVoice.lang;
         } else {
-          utterance.lang = langCode === 'en' ? 'en-US' : 'en-US';
+          utterance.lang = 'en-US';
         }
 
         utterance.rate = 0.95;

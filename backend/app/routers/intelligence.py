@@ -15,9 +15,16 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, status
 from fastapi.responses import Response
 import io
+import hashlib
+from pathlib import Path
 from pydantic import BaseModel
 import cv2
 import numpy as np
+
+# Persistent on-disk and in-memory audio cache for sub-millisecond TTS responses
+_TTS_CACHE_DIR = Path(__file__).resolve().parent.parent.parent / ".tts_cache"
+_TTS_CACHE_DIR.mkdir(exist_ok=True)
+_TTS_MEMORY_CACHE: dict[str, bytes] = {}
 
 from app.core.scan_repository import ScanRepository
 from app.services.qr_service import create_digital_product_profile
@@ -180,6 +187,37 @@ async def synthesize_speech(text: str, lang: str = "en"):
         if len(clean_text) > 1000:
             clean_text = clean_text[:1000]
 
+        cache_key = hashlib.md5(f"{lang_code}:{clean_text}".encode("utf-8")).hexdigest()
+
+        # 1. Check in-memory cache (sub-millisecond return)
+        if cache_key in _TTS_MEMORY_CACHE:
+            return Response(
+                content=_TTS_MEMORY_CACHE[cache_key],
+                media_type="audio/mpeg",
+                headers={
+                    "Content-Disposition": f'inline; filename="speech_{lang_code}.mp3"',
+                    "Cache-Control": "public, max-age=86400",
+                },
+            )
+
+        # 2. Check on-disk cache
+        cache_file = _TTS_CACHE_DIR / f"{lang_code}_{cache_key}.mp3"
+        if cache_file.exists():
+            try:
+                audio_bytes = cache_file.read_bytes()
+                _TTS_MEMORY_CACHE[cache_key] = audio_bytes
+                return Response(
+                    content=audio_bytes,
+                    media_type="audio/mpeg",
+                    headers={
+                        "Content-Disposition": f'inline; filename="speech_{lang_code}.mp3"',
+                        "Cache-Control": "public, max-age=86400",
+                    },
+                )
+            except Exception as read_err:
+                logger.debug(f"Failed to read disk cache: {read_err}")
+
+        # 3. Synthesize via gTTS
         if lang_code == "en":
             tts = gTTS(text=clean_text, lang="en", tld="co.in", slow=False)
         else:
@@ -189,6 +227,13 @@ async def synthesize_speech(text: str, lang: str = "en"):
         tts.write_to_fp(fp)
         fp.seek(0)
         audio_bytes = fp.read()
+
+        # Save to memory and disk cache
+        _TTS_MEMORY_CACHE[cache_key] = audio_bytes
+        try:
+            cache_file.write_bytes(audio_bytes)
+        except Exception as write_err:
+            logger.debug(f"Failed to write disk cache: {write_err}")
 
         return Response(
             content=audio_bytes,
@@ -214,4 +259,58 @@ class TTSRequest(BaseModel):
 @router.post("/tts", summary="Synthesize Multilingual Speech Audio (MP3) via POST")
 async def synthesize_speech_post(payload: TTSRequest):
     return await synthesize_speech(text=payload.text, lang=payload.lang)
+
+
+def warmup_tts_cache():
+    """
+    Pre-warm TTS in-memory cache from disk and pre-synthesize standard multilingual greetings.
+    Runs asynchronously in background thread at server startup so user requests respond in <5ms.
+    """
+    try:
+        loaded_count = 0
+        for mp3_path in _TTS_CACHE_DIR.glob("*.mp3"):
+            try:
+                parts = mp3_path.stem.split("_", 1)
+                if len(parts) == 2:
+                    cache_key = parts[1]
+                    if cache_key not in _TTS_MEMORY_CACHE:
+                        _TTS_MEMORY_CACHE[cache_key] = mp3_path.read_bytes()
+                        loaded_count += 1
+            except Exception:
+                pass
+        logger.info(f"Loaded {loaded_count} pre-cached TTS audio snippets into memory.")
+
+        standard_phrases = [
+            ("ta", "வணக்கம்! நான் உங்கள் சட்ட அளவியல் AI குரல் வழிகாட்டி. இந்த பொட்டலப் பொருள் தொடர்பான விதிமுறைகள், MRP விலை, காலாவதி தேதி, தயாரிப்பாளர் விவரங்கள் அல்லது நுகர்வோர் உரிமை குறித்து எதையும் கேட்கலாம்."),
+            ("ta", "வணக்கம்! நான் உங்கள் சட்ட அளவியல் AI குரல் வழிகாட்டி."),
+            ("ta", "இந்த பொட்டலப் பொருள் சட்ட அளவியல் விதிகள் 2011-ன் படி முழுமையாக இணங்குகிறது."),
+            ("ta", "அறிவிக்கப்பட்ட அதிகபட்ச சில்லறை விலை லேபிளில் குறிப்பிடப்பட்டுள்ளது. இது அனைத்து வரிகளையும் உள்ளடக்கியது."),
+            ("ta", "அதிகபட்ச சில்லறை விலைக்கு மேல் கூடுதல் கட்டணம் வசூலித்தால் தேசிய நுகர்வோர் உதவி எண் 1915-ல் புகார் செய்யலாம்."),
+            ("hi", "नमस्ते! मैं आपका विधिक मापविज्ञान AI वॉइस असिस्टेंट हूँ। इस डिब्बाबंद वस्तु के विधिक नियमों, MRP, निर्माण/एक्सपायरी तारीख, या उपभोक्ता अधिकारों के बारे में कुछ भी पूछें।"),
+            ("en", "Hello! I am your Legal Metrology AI Voice Assistant. Ask me anything about statutory rules, declared MRP, expiry intelligence, packaging damage, or consumer rights."),
+        ]
+
+        from gtts import gTTS
+        for lang_code, phrase in standard_phrases:
+            cache_key = hashlib.md5(f"{lang_code}:{phrase}".encode("utf-8")).hexdigest()
+            cache_file = _TTS_CACHE_DIR / f"{lang_code}_{cache_key}.mp3"
+            if cache_key in _TTS_MEMORY_CACHE and cache_file.exists():
+                continue
+            if cache_file.exists():
+                _TTS_MEMORY_CACHE[cache_key] = cache_file.read_bytes()
+                continue
+            try:
+                tts = gTTS(text=phrase, lang=lang_code, slow=False)
+                fp = io.BytesIO()
+                tts.write_to_fp(fp)
+                fp.seek(0)
+                data = fp.read()
+                _TTS_MEMORY_CACHE[cache_key] = data
+                cache_file.write_bytes(data)
+                logger.info(f"Pre-cached TTS for lang={lang_code}")
+            except Exception as e:
+                logger.debug(f"TTS warm-up for phrase failed: {e}")
+    except Exception as exc:
+        logger.warning(f"TTS cache warm-up failed (non-fatal): {exc}")
+
 

@@ -60,7 +60,15 @@ export const AIVoiceAssistantModal: React.FC<AIVoiceAssistantModalProps> = ({
   const currentLangObj = SUPPORTED_LANGUAGES.find(l => l.code === lang) || SUPPORTED_LANGUAGES[0];
 
   const getGreeting = (l: string) => {
-    const prodName = scan?.fields?.brand_name?.extracted_value || scan?.product_name || 'this packaged commodity';
+    const rawName = scan?.fields?.brand_name?.extracted_value || scan?.product_name;
+    const defaultName =
+      l === 'ta' ? 'இந்த பொட்டலப் பொருள்' :
+      l === 'hi' ? 'इस डिब्बाबंद वस्तु' :
+      l === 'te' ? 'ఈ ప్యాక్ చేయబడిన వస్తువు' :
+      l === 'kn' ? 'ಈ ಪ್ಯಾಕ್ ಮಾಡಿದ ಸರಕು' :
+      l === 'ml' ? 'ഈ പാക്കേജ് ചെയ്ത ഉൽപ്പന്നം' :
+      'this packaged commodity';
+    const prodName = rawName || defaultName;
     if (l === 'ta') {
       return `வணக்கம்! நான் உங்கள் சட்ட அளவியல் AI குரல் வழிகாட்டி. ${prodName} தொடர்பான விதிமுறைகள், MRP விலை, காலாவதி தேதி, தயாரிப்பாளர் விவரங்கள் அல்லது நுகர்வோர் உரிமை குறித்து எதையும் கேட்கலாம்.`;
     }
@@ -173,6 +181,9 @@ export const AIVoiceAssistantModal: React.FC<AIVoiceAssistantModalProps> = ({
   const speakText = (text: string) => {
     const clean = text.replace(/[*#_`]/g, '').trim();
     if (!clean) return;
+
+    setAssistantState('speaking');
+    setIsSpeechPaused(false);
 
     speechService.speak(clean, currentLangObj.code, {
       onStart: () => {

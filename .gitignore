@@ -35,3 +35,8 @@ Thumbs.db
 *.db-shm
 *.sqlite
 *.sqlite3
+
+# Audio / TTS Cache
+.tts_cache/
+*.mp3
+

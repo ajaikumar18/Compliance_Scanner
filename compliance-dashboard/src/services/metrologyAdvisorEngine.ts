@@ -11,12 +11,24 @@ export interface AdvisorResponse {
 export const metrologyAdvisorEngine = {
   processQuery(rawQuery: string, lang: string = 'en', scan?: ScanResult): AdvisorResponse {
     const q = (rawQuery || '').trim().toLowerCase();
-    const productName = scan?.fields?.brand_name?.extracted_value || scan?.product_name || 'this packaged commodity';
-    const mrp = scan?.fields?.mrp?.extracted_value || 'Declared on package';
-    const netQty = scan?.fields?.net_quantity?.extracted_value || 'Declared on package';
-    const mfg = scan?.fields?.date?.extracted_value || scan?.expiry_intelligence?.manufacturing_date || 'Declared on package';
-    const exp = scan?.expiry_intelligence?.expiry_date || 'Declared on package';
-    const mfr = scan?.fields?.manufacturer_name_address?.extracted_value || 'Declared on package';
+    const rawProd = scan?.fields?.brand_name?.extracted_value || scan?.product_name;
+    const productName = rawProd || (
+      lang === 'ta' ? 'இந்த பொட்டலப் பொருள்' :
+      lang === 'hi' ? 'यह डिब्बाबंद वस्तु' :
+      lang === 'te' ? 'ఈ ప్యాక్ చేయబడిన వస్తువు' :
+      lang === 'kn' ? 'ಈ ಪ್ಯಾಕ್ ಮಾಡಿದ ಸರಕು' :
+      lang === 'ml' ? 'ഈ പാക്കേജ് ചെയ്ത ഉൽപ്പന്നം' :
+      'this packaged commodity'
+    );
+    const declaredFallback =
+      lang === 'ta' ? 'லேபிளில் குறிப்பிடப்பட்டுள்ளது' :
+      lang === 'hi' ? 'पैकेज पर घोषित' :
+      'Declared on package';
+    const mrp = scan?.fields?.mrp?.extracted_value || declaredFallback;
+    const netQty = scan?.fields?.net_quantity?.extracted_value || declaredFallback;
+    const mfg = scan?.fields?.date?.extracted_value || scan?.expiry_intelligence?.manufacturing_date || declaredFallback;
+    const exp = scan?.expiry_intelligence?.expiry_date || declaredFallback;
+    const mfr = scan?.fields?.manufacturer_name_address?.extracted_value || declaredFallback;
     const isCompliant = scan?.compliance_status === 'compliant' || scan?.compliant !== false;
     const violationsCount = scan?.violations_count || (scan?.violations ? scan.violations.length : 0);
 
@@ -170,6 +182,23 @@ export const metrologyAdvisorEngine = {
     if (q.includes('damage') || q.includes('tear') || q.includes('leak') || q.includes('condition') || q.includes('சேதம்') || q.includes('நொறுங்கல்') || q.includes('खराबी') || q.includes('टूटा')) {
       const condition = scan?.damage_analysis?.condition || 'GOOD';
       const score = scan?.damage_analysis?.condition_score || 95;
+      if (lang === 'ta') {
+        return {
+          spokenText: `பேக்கேஜிங் மேற்பரப்பு ஒருமைப்பாடு மதிப்பீடு நூற்றுக்கு ${score} சதவீதம். பேக்கேஜிங் நிலை ${condition === 'GOOD' ? 'நன்றாக உள்ளது' : condition}. உடல்ரீதியான சேதங்கள் எதுவும் இல்லை.`,
+          directAnswer: `**பேக்கேஜிங் நிலை:** ${condition} (ஒருமைப்பாடு மதிப்பீடு: ${score}/100)\n\nகணினி பார்வை பகுப்பாய்வு மூலம் பேக்கேஜிங் மேற்பரப்பு மற்றும் சீல் ஒருமைப்பாடு சரிபார்க்கப்பட்டது.`,
+          statutoryRule: 'Packaging & Storage Standards',
+          recommendation: scan?.damage_analysis?.recommendation || 'சாதாரண சேமிப்பிற்கு பேக்கேஜிங் பாதுகாப்பானது.',
+          category: 'damage'
+        };
+      } else if (lang === 'hi') {
+        return {
+          spokenText: `पैकेज अखंडता स्कोर 100 में से ${score} प्रतिशत है। पैकेज की स्थिति ${condition} आंकी गई है। कोई बड़ा नुकसान नहीं पाया गया।`,
+          directAnswer: `**पैकेज स्थिति:** ${condition} (अखंडता स्कोर: ${score}/100)\n\nपैकेजिंग की सतह और सील की स्थिति की पुष्टि की गई।`,
+          statutoryRule: 'Packaging & Storage Standards',
+          recommendation: scan?.damage_analysis?.recommendation || 'सामान्य भंडारण के लिए पैकेज सुरक्षित है।',
+          category: 'damage'
+        };
+      }
       return {
         spokenText: `Package surface integrity score is ${score} out of 100. Condition is assessed as ${condition}. No major physical ruptures detected.`,
         directAnswer: `**Package Condition:** ${condition} (Integrity Score: ${score}/100)\n\nAutomated computer vision edge raggedness and stain analysis confirms packaging surface integrity.`,
@@ -181,6 +210,23 @@ export const metrologyAdvisorEngine = {
 
     // 6. MANUFACTURER & ORIGIN
     if (q.includes('manufactur') || q.includes('company') || q.includes('origin') || q.includes('தயாரிப்பாளர்') || q.includes('உற்பத்தி') || q.includes('कंपनी') || q.includes('निर्माता')) {
+      if (lang === 'ta') {
+        return {
+          spokenText: `லேபிளில் அறிவிக்கப்பட்ட சட்டப்பூர்வ தயாரிப்பாளர் ${mfr} ஆகும். விதி 6(10)-ன் படி பிறப்பிட நாடு இந்தியா.`,
+          directAnswer: `**தயாரிப்பாளர்:** ${mfr}\n**பிறப்பிட நாடு:** இந்தியா\n\nசட்ட அளவியல் விதிகள் 2011 விதி 6(1)(a) மற்றும் விதி 6(10)-ன் கீழ் முழுமையான பெயர், முகவரி மற்றும் பிறப்பிட நாடு குறிப்பிடப்பட வேண்டும்.`,
+          statutoryRule: 'PCR 2011 - Rule 6(1)(a) & Rule 6(10)',
+          recommendation: 'முழுமையான தெரு முகவரி மற்றும் அஞ்சல் குறியீட்டு எண் அச்சிடப்பட்டிருக்க வேண்டும்.',
+          category: 'manufacturer'
+        };
+      } else if (lang === 'hi') {
+        return {
+          spokenText: `लेबल पर घोषित वैधानिक निर्माता ${mfr} है। नियम 6(10) के तहत मूल देश भारत है।`,
+          directAnswer: `**वैधानिक निर्माता:** ${mfr}\n**मूल देश:** भारत\n\nनियम 6(1)(a) और नियम 6(10) के तहत निर्माता का पूरा नाम, पता और देश घोषित होना अनिवार्य है।`,
+          statutoryRule: 'PCR 2011 - Rule 6(1)(a) & Rule 6(10)',
+          recommendation: 'पूरा पता और पिन कोड आवश्यक है।',
+          category: 'manufacturer'
+        };
+      }
       return {
         spokenText: `Statutory manufacturer declared on label is ${mfr}. Country of origin is India under Rule 6(10).`,
         directAnswer: `**Statutory Entity:** ${mfr}\n**Country of Origin:** India\n\nUnder Rule 6(1)(a) and Rule 6(10), every package must clearly state the complete name and address of the manufacturer or packer, as well as the country of origin for imported or domestic goods.`,
@@ -190,7 +236,38 @@ export const metrologyAdvisorEngine = {
       };
     }
 
+    // 7. CONSUMER GRIEVANCE / 1915
+    if (q.includes('complain') || q.includes('consumer') || q.includes('1915') || q.includes('helpline') || q.includes('புகார்') || q.includes('நுகர்வோர்') || q.includes('शिकायत')) {
+      if (lang === 'ta') {
+        return {
+          spokenText: `அதிகபட்ச சில்லறை விலைக்கு மேல் கூடுதல் கட்டணம் வசூலித்தால் தேசிய நுகர்வோர் உதவி எண் 1915-ல் புகார் செய்யலாம்.`,
+          directAnswer: `**நுகர்வோர் குறைதீர்க்கும் வழிமுறைகள்:**\n\n- **தேசிய நுகர்வோர் உதவி எண் (NCH):** 1915\n- **சட்ட விதி:** சட்ட அளவியல் சட்டம் 2009 பிரிவு 36-ன் கீழ் MRP-க்கு மேல் விற்பது குற்றமாகும்.`,
+          statutoryRule: 'Legal Metrology Act, 2009 - Section 36',
+          recommendation: 'பில் அல்லது ரசீதை ஆதாரமாக வைத்து 1915-ல் புகார் பதிவு செய்யவும்.',
+          category: 'grievance'
+        };
+      }
+    }
+
     // DEFAULT FALLBACK
+    if (lang === 'ta') {
+      return {
+        spokenText: `இது ${productName} பொருளுக்கான சட்ட அளவியல் ஆய்வு ஆகும். அறிவிக்கப்பட்ட அதிகபட்ச சில்லறை விலை ${mrp}, நிகர எடை ${netQty}, மற்றும் நிலை ${isCompliant ? 'சட்டப்படி சரியானது' : 'விதிமீறல்கள் உள்ளன'}. விதிமுறைகள், விலை, அல்லது காலாவதி தேதி குறித்து கேட்கலாம்.`,
+        directAnswer: `**${productName} தயாரிப்பு சுருக்கம்**\n\n- **சட்ட இணக்க நிலை:** ${isCompliant ? 'முழுமையாக சரியானது (COMPLIANT)' : 'விதிமீறல் (NON-COMPLIANT)'}\n- **அறிவிக்கப்பட்ட MRP:** ${mrp}\n- **நிகர அளவு:** ${netQty}\n- **தயாரிப்பாளர்:** ${mfr}\n- **தயாரிப்பு / காலாவதி:** ${mfg} / ${exp}\n\nசட்ட அளவியல் விதிகள் 2011, எழுத்துரு அளவு, அல்லது நுகர்வோர் குறைதீர்க்கும் 1915 பற்றி கேட்கலாம்.`,
+        statutoryRule: 'Legal Metrology (Packaged Commodities) Rules, 2011',
+        recommendation: 'நுகர்வோர் குறைகளுக்கு தேசிய நுகர்வோர் உதவி எண் 1915-ஐ தொடர்பு கொள்ளவும்.',
+        category: 'general'
+      };
+    } else if (lang === 'hi') {
+      return {
+        spokenText: `यह ${productName} के लिए विधिक मापविज्ञान विश्लेषण है। घोषित एमआरपी ${mrp}, शुद्ध मात्रा ${netQty}, और स्थिति ${isCompliant ? 'अनुरूप' : 'गैर-अनुपालन'} है। नियमों, मूल्य या समाप्ति तिथि के बारे में पूछें।`,
+        directAnswer: `**${productName} उत्पाद विवरण**\n\n- **स्थिति:** ${isCompliant ? 'अनुरूप (COMPLIANT)' : 'गैर-अनुपालन (NON-COMPLIANT)'}\n- **घोषित MRP:** ${mrp}\n- **शुद्ध मात्रा:** ${netQty}\n- **निर्माता:** ${mfr}\n- **विनिर्माण / समाप्ति:** ${mfg} / ${exp}\n\nआप पीसीआर 2011 नियमों या 1915 हेल्पलाइन के बारे में पूछ सकते हैं।`,
+        statutoryRule: 'Legal Metrology (Packaged Commodities) Rules, 2011',
+        recommendation: 'उपभोक्ता शिकायतों के लिए राष्ट्रीय उपभोक्ता हेल्पलाइन 1915 पर संपर्क करें।',
+        category: 'general'
+      };
+    }
+
     return {
       spokenText: `This is an official Legal Metrology analysis for ${productName}. The declared MRP is ${mrp}, net quantity is ${netQty}, and overall status is ${isCompliant ? 'Compliant' : 'Non-compliant'}. Ask about rules, pricing, expiry, or manufacturer details.`,
       directAnswer: `**Legal Metrology Product Summary for ${productName}**\n\n- **Status:** ${isCompliant ? 'COMPLIANT' : 'NON-COMPLIANT'}\n- **Declared MRP:** ${mrp}\n- **Net Quantity:** ${netQty}\n- **Manufacturer:** ${mfr}\n- **Manufacture / Expiry:** ${mfg} / ${exp}\n\nYou can ask about specific PCR 2011 rules, font size standards, overcharging grievances, or package damage checks.`,
