@@ -11,7 +11,8 @@ import {
   Pause, 
   Play, 
   Scale, 
-  Keyboard 
+  Keyboard,
+  X 
 } from 'lucide-react';
 import { useLanguage } from '../i18n/i18nContext';
 import { metrologyAdvisorEngine } from '../services/metrologyAdvisorEngine';
@@ -279,15 +280,42 @@ export const LeftVoiceAIPanel: React.FC<LeftVoiceAIPanelProps> = ({
             </div>
           )}
 
-          <button
-            type="button"
-            onClick={() => setIsExpanded(!isExpanded)}
-            className="p-1.5 rounded-none bg-[#2A3F55] hover:bg-[#3E5671] text-white transition"
-            aria-label={isExpanded ? t('voiceAI.collapseDock') : t('voiceAI.expandDock')}
-            title={isExpanded ? `${t('voiceAI.collapseDock')} (Alt+V)` : `${t('voiceAI.expandDock')} (Alt+V)`}
-          >
-            {isExpanded ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-          </button>
+          {isExpanded ? (
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  speechService.stop();
+                  setIsExpanded(false);
+                }}
+                className="px-2 py-1 bg-[#2A3F55] hover:bg-rose-600 text-white transition flex items-center gap-1 text-[11px] font-bold border border-[#3E5671] hover:border-rose-500 shadow-sm cursor-pointer"
+                title="Close Voice Assistant (Esc / Alt+V)"
+                aria-label="Close Voice Assistant"
+              >
+                <X className="w-3.5 h-3.5 text-rose-300" />
+                <span>Close</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsExpanded(false)}
+                className="p-1.5 rounded-none bg-[#2A3F55] hover:bg-[#3E5671] text-white transition cursor-pointer"
+                aria-label={t('voiceAI.collapseDock')}
+                title={`${t('voiceAI.collapseDock')} (Alt+V)`}
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setIsExpanded(true)}
+              className="p-1.5 rounded-none bg-[#2A3F55] hover:bg-[#3E5671] text-white transition cursor-pointer"
+              aria-label={t('voiceAI.expandDock')}
+              title={`${t('voiceAI.expandDock')} (Alt+V)`}
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          )}
         </div>
 
         {/* Compact Dock Actions (when collapsed) */}

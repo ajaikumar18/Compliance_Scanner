@@ -45,7 +45,7 @@ class Settings(BaseSettings):
 
     # ── App ───────────────────────────────────────────────────────────────────
     APP_NAME: str = "labelGuard AI"
-    APP_VERSION: str = "3.0.0"
+    APP_VERSION: str = "3.0.1"
     DEBUG: bool = False
 
     model_config = SettingsConfigDict(

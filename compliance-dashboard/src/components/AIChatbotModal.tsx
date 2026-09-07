@@ -83,11 +83,39 @@ export const AIChatbotModal: React.FC<AIChatbotModalProps> = ({
     return () => unsubscribe();
   }, []);
 
-  // Cleanup speech recognition and synthesis on unmount / close
+  // Stop speech and mic when closed
+  useEffect(() => {
+    if (!isOpen) {
+      speechService.stop();
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.abort();
+        } catch {}
+      }
+      setIsSpeaking(false);
+      setIsListening(false);
+    }
+  }, [isOpen]);
+
+  // Handle keyboard Escape to close modal
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isOpen) {
+        speechService.stop();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
+  // Cleanup speech recognition and synthesis on unmount
   useEffect(() => {
     return () => {
       if (recognitionRef.current) {
-        recognitionRef.current.abort();
+        try {
+          recognitionRef.current.abort();
+        } catch {}
       }
       speechService.stop();
     };
@@ -215,8 +243,19 @@ export const AIChatbotModal: React.FC<AIChatbotModalProps> = ({
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-3 sm:p-4 animate-in fade-in duration-200 font-sans">
-      <div className="relative w-full max-w-2xl h-[90vh] max-h-[750px] bg-[#121D28] border border-[#2A3F55] rounded-none shadow-2xl overflow-hidden flex flex-col text-white">
+    <div 
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-3 sm:p-4 animate-in fade-in duration-200 font-sans cursor-pointer"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          stopSpeaking();
+          onClose();
+        }
+      }}
+    >
+      <div 
+        className="relative w-full max-w-2xl h-[90vh] max-h-[750px] bg-[#121D28] border border-[#2A3F55] rounded-none shadow-2xl overflow-hidden flex flex-col text-white cursor-default"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-[#2A3F55] bg-[#1C2B3A]">
           <div className="flex items-center gap-3">
@@ -259,11 +298,19 @@ export const AIChatbotModal: React.FC<AIChatbotModalProps> = ({
               </select>
             </div>
 
+            {/* Prominent High-Contrast Close Button */}
             <button
-              onClick={onClose}
-              className="text-[#94A3B8] hover:text-white p-1.5 transition"
+              type="button"
+              onClick={() => {
+                stopSpeaking();
+                onClose();
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-[#2A3F55] hover:bg-rose-600 text-white text-xs font-bold transition border border-[#3E5671] hover:border-rose-500 shadow-sm cursor-pointer shrink-0"
+              title="Close Assistant (Esc)"
+              aria-label="Close Assistant"
             >
-              <X className="w-5 h-5" />
+              <X className="w-4 h-4 text-rose-300" />
+              <span>Close</span>
             </button>
           </div>
         </div>
@@ -377,9 +424,24 @@ export const AIChatbotModal: React.FC<AIChatbotModalProps> = ({
             type="button"
             onClick={() => handleSendMessage()}
             disabled={!inputText.trim() || loading}
-            className="p-2.5 bg-[#2A3F55] hover:bg-[#3E5671] disabled:opacity-40 text-white font-bold transition shrink-0 border border-[#3E5671]"
+            className="p-2.5 bg-[#2A3F55] hover:bg-[#3E5671] disabled:opacity-40 text-white font-bold transition shrink-0 border border-[#3E5671] cursor-pointer"
+            title="Send query"
           >
             <Send className="w-4 h-4 text-emerald-300" />
+          </button>
+
+          {/* Secondary Bottom Close Button */}
+          <button
+            type="button"
+            onClick={() => {
+              stopSpeaking();
+              onClose();
+            }}
+            className="px-3 py-2.5 bg-[#1C2B3A] hover:bg-rose-900/60 text-[#94A3B8] hover:text-white border border-[#2A3F55] hover:border-rose-700 transition shrink-0 flex items-center gap-1.5 text-xs font-semibold cursor-pointer"
+            title="Close Assistant (Esc)"
+          >
+            <X className="w-4 h-4 text-rose-300" />
+            <span className="hidden sm:inline">Close</span>
           </button>
         </div>
       </div>

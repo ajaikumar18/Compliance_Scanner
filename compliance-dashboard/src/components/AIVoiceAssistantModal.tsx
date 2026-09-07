@@ -73,6 +73,9 @@ export const AIVoiceAssistantModal: React.FC<AIVoiceAssistantModalProps> = ({
     if (l === 'kn') {
       return `ನಮಸ್ಕಾರ! ನಾನು ನಿಮ್ಮ ಕಾನೂನು ಮಾಪನಶಾಸ್ತ್ರ AI ಧ್ವನಿ ಸಹಾಯಕ. ${prodName} ನಿಯಮಗಳು, MRP ಬೆಲೆ, ಮುಕ್ತಾಯ ದಿನಾಂಕ ಅಥವಾ ತಯಾರಕರ ವಿವರಗಳ ಬಗ್ಗೆ ಏನನ್ನಾದರೂ ಕೇಳಿ.`;
     }
+    if (l === 'ml') {
+      return `നമസ്കാരം! ഞാൻ നിങ്ങളുടെ ലീഗൽ മെട്രോളജി AI വോയ്സ് അസിസ്റ്റന്റാണ്. ${prodName} സംബന്ധിച്ച നിയമങ്ങൾ, MRP വില, കാലാവധി തീയതി അല്ലെങ്കിൽ നിർമ്മാതാവിന്റെ വിവരങ്ങൾ എന്നിവയെക്കുറിച്ച് ചോദിക്കാം.`;
+    }
     return `Hello! I am your Legal Metrology AI Voice Assistant. Ask me anything about statutory rules, declared MRP, expiry intelligence, packaging damage, or consumer rights for ${prodName}.`;
   };
 
@@ -126,12 +129,40 @@ export const AIVoiceAssistantModal: React.FC<AIVoiceAssistantModalProps> = ({
     return () => unsubscribe();
   }, []);
 
-  // Clean speech synthesis on unmount / close
+  // Stop speaking and recognition when modal is closed
+  useEffect(() => {
+    if (!isOpen) {
+      speechService.stop();
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.abort();
+        } catch {}
+      }
+      setAssistantState('idle');
+      setIsSpeechPaused(false);
+    }
+  }, [isOpen]);
+
+  // Handle keyboard Escape to close modal
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isOpen) {
+        speechService.stop();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
+  // Clean speech synthesis on unmount
   useEffect(() => {
     return () => {
       speechService.stop();
       if (recognitionRef.current) {
-        recognitionRef.current.abort();
+        try {
+          recognitionRef.current.abort();
+        } catch {}
       }
     };
   }, []);
@@ -304,6 +335,13 @@ export const AIVoiceAssistantModal: React.FC<AIVoiceAssistantModalProps> = ({
       { cat: 'pricing', icon: '💰', q: 'ಘೋಷಿತ MRP ಮತ್ತು ತೆರಿಗೆ ವಿವರಗಳೇನು?' },
       { cat: 'expiry', icon: '⏳', q: 'ಮುಕ್ತಾಯ ದಿನಾಂಕ ಮತ್ತು ಉಳಿದ ದಿನಗಳು ಎಷ್ಟು?' },
     ],
+    ml: [
+      { cat: 'compliance', icon: '⚖️', q: 'ഈ ഉൽപ്പന്നം പിസിആർ 2011 നിയമങ്ങൾക്ക് അനുസൃതമാണോ?' },
+      { cat: 'pricing', icon: '💰', q: 'പ്രഖ്യാപിച്ച എംആർപിയും നികുതി വിവരങ്ങളും എന്താണ്?' },
+      { cat: 'expiry', icon: '⏳', q: 'കാലാവധി തീയതിയും ശേഷിക്കുന്ന ദിവസങ്ങളും എത്രയാണ്?' },
+      { cat: 'quantity', icon: '📦', q: 'അളവ് നിയമം 12 അനുസരിച്ചാണോ?' },
+      { cat: 'damage', icon: '🛡️', q: 'പാക്കേജ് കേടുപാടുകളും സീലും പരിശോധിക്കുക' },
+    ],
     en: [
       { cat: 'compliance', icon: '⚖️', q: 'Is this product compliant with PCR 2011?' },
       { cat: 'pricing', icon: '💰', q: 'What is the declared MRP & unit sale price?' },
@@ -330,10 +368,21 @@ export const AIVoiceAssistantModal: React.FC<AIVoiceAssistantModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-3 sm:p-4 animate-in fade-in duration-200 font-sans">
-      <div className="relative w-full max-w-2xl h-[92vh] max-h-[780px] bg-[#121D28] border border-[#2A3F55] rounded-none shadow-2xl overflow-hidden flex flex-col text-white">
+    <div 
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-3 sm:p-4 animate-in fade-in duration-200 font-sans cursor-pointer"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          handleStopSpeaking();
+          onClose();
+        }
+      }}
+    >
+      <div 
+        className="relative w-full max-w-2xl h-[92vh] max-h-[780px] bg-[#121D28] border border-[#2A3F55] rounded-none shadow-2xl overflow-hidden flex flex-col text-white cursor-default"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Top Official Banner */}
-        <div className="px-6 py-4 border-b border-[#2A3F55] bg-[#1C2B3A] flex items-center justify-between">
+        <div className="px-5 sm:px-6 py-4 border-b border-[#2A3F55] bg-[#1C2B3A] flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="relative">
               <div className="w-10 h-10 rounded-none bg-[#2A3F55] border border-[#3E5671] flex items-center justify-center text-emerald-300 font-bold shadow-xs">
@@ -380,12 +429,19 @@ export const AIVoiceAssistantModal: React.FC<AIVoiceAssistantModalProps> = ({
               </select>
             </div>
 
+            {/* Prominent High-Contrast Close Button */}
             <button
-              onClick={onClose}
-              className="p-2 text-[#94A3B8] hover:text-white hover:bg-[#2A3F55] transition"
-              title="Close Voice Assistant"
+              type="button"
+              onClick={() => {
+                handleStopSpeaking();
+                onClose();
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-[#2A3F55] hover:bg-rose-600 text-white text-xs font-bold transition border border-[#3E5671] hover:border-rose-500 shadow-sm cursor-pointer shrink-0"
+              title="Close Voice Assistant (Esc)"
+              aria-label="Close Voice Assistant"
             >
-              <X className="w-5 h-5" />
+              <X className="w-4 h-4 text-rose-300" />
+              <span>Close</span>
             </button>
           </div>
         </div>
@@ -590,12 +646,12 @@ export const AIVoiceAssistantModal: React.FC<AIVoiceAssistantModalProps> = ({
           ))}
         </div>
 
-        {/* Input Bar (Voice Mic + Text) */}
+        {/* Input Bar (Voice Mic + Text + Close) */}
         <div className="p-3 sm:p-4 bg-[#16222F] border-t border-[#2A3F55] flex items-center gap-2">
           <button
             type="button"
             onClick={handleMicClick}
-            className={`p-2.5 border transition flex items-center justify-center shrink-0 ${
+            className={`p-2.5 border transition flex items-center justify-center shrink-0 cursor-pointer ${
               assistantState === 'listening'
                 ? 'bg-rose-900/60 border-rose-500 text-rose-200 animate-pulse'
                 : 'bg-[#1C2B3A] hover:bg-[#2A3F55] text-[#94A3B8] hover:text-white border-[#2A3F55]'
@@ -618,9 +674,24 @@ export const AIVoiceAssistantModal: React.FC<AIVoiceAssistantModalProps> = ({
             type="button"
             onClick={() => handleQuery(textInput)}
             disabled={!textInput.trim() || assistantState === 'processing'}
-            className="p-2.5 bg-[#2A3F55] hover:bg-[#3E5671] disabled:opacity-40 text-white font-bold transition shrink-0 border border-[#3E5671]"
+            className="p-2.5 bg-[#2A3F55] hover:bg-[#3E5671] disabled:opacity-40 text-white font-bold transition shrink-0 border border-[#3E5671] cursor-pointer"
+            title="Send query"
           >
             <Send className="w-4 h-4 text-emerald-300" />
+          </button>
+
+          {/* Secondary Bottom Close Button */}
+          <button
+            type="button"
+            onClick={() => {
+              handleStopSpeaking();
+              onClose();
+            }}
+            className="px-3 py-2.5 bg-[#1C2B3A] hover:bg-rose-900/60 text-[#94A3B8] hover:text-white border border-[#2A3F55] hover:border-rose-700 transition shrink-0 flex items-center gap-1.5 text-xs font-semibold cursor-pointer"
+            title="Close Voice Assistant (Esc)"
+          >
+            <X className="w-4 h-4 text-rose-300" />
+            <span className="hidden sm:inline">Close</span>
           </button>
         </div>
       </div>

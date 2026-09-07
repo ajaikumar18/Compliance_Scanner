@@ -180,7 +180,11 @@ async def synthesize_speech(text: str, lang: str = "en"):
         if len(clean_text) > 1000:
             clean_text = clean_text[:1000]
 
-        tts = gTTS(text=clean_text, lang=lang_code, slow=False)
+        if lang_code == "en":
+            tts = gTTS(text=clean_text, lang="en", tld="co.in", slow=False)
+        else:
+            tts = gTTS(text=clean_text, lang=lang_code, slow=False)
+
         fp = io.BytesIO()
         tts.write_to_fp(fp)
         fp.seek(0)
@@ -200,4 +204,14 @@ async def synthesize_speech(text: str, lang: str = "en"):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to synthesize speech: {str(exc)}",
         )
+
+
+class TTSRequest(BaseModel):
+    text: str
+    lang: str = "en"
+
+
+@router.post("/tts", summary="Synthesize Multilingual Speech Audio (MP3) via POST")
+async def synthesize_speech_post(payload: TTSRequest):
+    return await synthesize_speech(text=payload.text, lang=payload.lang)
 
