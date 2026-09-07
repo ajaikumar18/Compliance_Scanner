@@ -359,3 +359,184 @@ def preprocess_pipeline(image: np.ndarray) -> np.ndarray:
 
     logger.info("preprocess_pipeline: complete -> shape=%s", step2.shape)
     return step2
+
+
+def generate_preprocessing_variants(image: np.ndarray) -> dict[str, np.ndarray]:
+    if image is None or image.size == 0:
+        raise ValueError("generate_preprocessing_variants received empty or None image.")
+
+    h, w = image.shape[:2]
+    max_dim = max(h, w)
+
+    # Resolution normalization for optimal OCR glyph height (target approx 25-35px font height)
+    if max_dim < 1100:
+        scale_factor = min(3.0, 1400.0 / max_dim)
+        working_img = cv2.resize(image, (0, 0), fx=scale_factor, fy=scale_factor, interpolation=cv2.INTER_CUBIC)
+    elif max_dim > 1600:
+        scale_factor = 1400.0 / max_dim
+        working_img = cv2.resize(image, (0, 0), fx=scale_factor, fy=scale_factor, interpolation=cv2.INTER_AREA)
+    else:
+        working_img = image
+
+    variants: dict[str, np.ndarray] = {}
+
+    # 1. CLAHE Grayscale directly from raw working image (preserves delicate font glyphs)
+    gray = _to_gray(working_img)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    clahe_gray = clahe.apply(gray)
+    variants["clahe_gray"] = clahe_gray
+
+    # 2. Enhanced BGR (contrast + glare roll-off)
+    enhanced_bgr = enhance_contrast(working_img)
+    variants["enhanced_bgr"] = enhanced_bgr
+
+    # 3. Deskewed orientation variant
+    deskewed = detect_and_correct_skew(working_img)
+    variants["deskewed"] = deskewed
+
+    # 4. Vertical Text Variant (for statutory dates / batch numbers printed on packaging side flaps)
+    rot_270 = cv2.rotate(clahe_gray, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    variants["vertical_rot270"] = rot_270
+
+    # 4. Adaptive Thresholding (robust against shadows and gradient backgrounds)
+    blurred = cv2.GaussianBlur(clahe_gray, (3, 3), 0)
+    adaptive_thresh = cv2.adaptiveThreshold(
+        blurred, 255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY,
+        blockSize=15,
+        C=4,
+    )
+    variants["adaptive_thresh"] = adaptive_thresh
+
+    # 4. Otsu's Bimodal Thresholding
+    _, otsu_thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    variants["otsu_thresh"] = otsu_thresh
+
+    # 5. Sharpened (Unsharp Masking for small character edges)
+    gaussian = cv2.GaussianBlur(enhanced_bgr, (0, 0), 2.0)
+    sharpened = cv2.addWeighted(enhanced_bgr, 1.5, gaussian, -0.5, 0)
+    variants["sharpened"] = sharpened
+
+    logger.debug("generate_preprocessing_variants: generated %d variants", len(variants))
+    return variants
+
+
+def detect_text_regions(
+    image: np.ndarray,
+    min_area: int = 150,
+    max_area_ratio: float = 0.95,
+) -> list[list[int]]:
+    """
+    Dynamically discover text-dense candidate regions on arbitrary packaging using
+    morphological gradient and horizontal connected-component clustering.
+
+    Zero fixed crops or hardcoded coordinates.
+
+    Parameters:
+    -----------
+    image : np.ndarray
+        Input BGR or grayscale image.
+    min_area : int
+        Minimum contour area to consider (filters out specks / noise).
+    max_area_ratio : float
+        Maximum fraction of total image area (filters out whole-image border box).
+
+    Returns:
+    --------
+    list[list[int]]
+        List of [x, y, w, h] bounding rectangles for detected text regions.
+    """
+    if image is None or image.size == 0:
+        return []
+
+    h_img, w_img = image.shape[:2]
+    total_area = h_img * w_img
+    gray = _to_gray(image)
+
+    # 1. Morphological Gradient to highlight character strokes
+    kernel_grad = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    grad = cv2.morphologyEx(gray, cv2.MORPH_GRADIENT, kernel_grad)
+
+    # 2. Binarize gradient using Otsu
+    _, thresh = cv2.threshold(grad, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+    # 3. Connect horizontally adjacent characters into words / lines (25x3 kernel)
+    kernel_horiz = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 3))
+    connected = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel_horiz)
+
+    # 4. Find external contours
+    contours, _ = cv2.findContours(connected, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    boxes: list[list[int]] = []
+    for cnt in contours:
+        x, y, w, h = cv2.boundingRect(cnt)
+        area = w * h
+
+        # Filter noise and huge bounding boxes
+        if area < min_area:
+            continue
+        if area > total_area * max_area_ratio:
+            continue
+        if w < 12 or h < 6:
+            continue
+
+        # Add small padding to avoid clipping character strokes
+        pad_x = int(w * 0.05)
+        pad_y = int(h * 0.05)
+        x_pad = max(0, x - pad_x)
+        y_pad = max(0, y - pad_y)
+        w_pad = min(w_img - x_pad, w + 2 * pad_x)
+        h_pad = min(h_img - y_pad, h + 2 * pad_y)
+
+        boxes.append([x_pad, y_pad, w_pad, h_pad])
+
+    # 5. Sort regions top-to-bottom, left-to-right
+    boxes.sort(key=lambda b: (b[1], b[0]))
+    logger.debug("detect_text_regions: discovered %d text regions", len(boxes))
+    return boxes
+
+
+def preprocess_pipeline(image: np.ndarray) -> np.ndarray:
+    """
+    Full preprocessing pipeline – runs all three steps in sequence:
+
+      1. detect_and_correct_skew   – straighten rotated text
+      2. correct_perspective       – flatten label perspective distortion
+      3. enhance_contrast          – CLAHE + glare suppression
+
+    Parameters
+    ----------
+    image : np.ndarray
+        Input BGR (or grayscale) image.
+
+    Returns
+    -------
+    np.ndarray
+        Fully preprocessed BGR image ready for OCR.
+
+    Raises
+    ------
+    ValueError
+        If *image* is None or empty.
+    """
+    if image is None or image.size == 0:
+        raise ValueError("preprocess_pipeline received an empty or None image.")
+
+    logger.info("preprocess_pipeline: starting on shape=%s", image.shape)
+
+    # Downscale oversized images (max dimension > 1600px) for high-performance OCR
+    h, w = image.shape[:2]
+    max_dim = max(h, w)
+    if max_dim > 1600:
+        scale = 1600.0 / max_dim
+        new_w, new_h = int(w * scale), int(h * scale)
+        image = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        logger.info("preprocess_pipeline: resized shape (%d, %d) -> (%d, %d)", h, w, new_h, new_w)
+
+    step1 = detect_and_correct_skew(image)
+    step2 = correct_perspective(step1)
+    step3 = enhance_contrast(step2)
+
+    logger.info("preprocess_pipeline: complete -> shape=%s", step3.shape)
+    return step3

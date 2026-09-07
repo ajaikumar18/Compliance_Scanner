@@ -6,6 +6,7 @@ import { UploadPage } from './pages/UploadPage';
 import { ScanResultPage } from './pages/ScanResultPage';
 import { AnalyticsPage } from './pages/AnalyticsPage';
 import { TrustLookupPage } from './pages/TrustLookupPage';
+import { PublicVerificationView } from './components/PublicVerificationView';
 import { fetchScans, getBatchStatus, MOCK_SCANS } from './services/api';
 
 import type { ScanResult, User } from './types';
@@ -18,16 +19,33 @@ export function App() {
   });
   const [token, setToken] = useState<string | null>('demo-token');
   const [activeTab, setActiveTab] = useState<'dashboard' | 'upload' | 'results' | 'analytics'>('dashboard');
-  const [viewMode, setViewMode] = useState<'app' | 'trust'>(() => {
-    return (
-      typeof window !== 'undefined' &&
-      (window.location.pathname.includes('trust') ||
-        window.location.hash.includes('trust') ||
-        window.location.pathname.includes('lookup') ||
-        window.location.search.includes('trust'))
-    )
-      ? 'trust'
-      : 'app';
+  const [verifyId] = useState<string>(() => {
+    if (typeof window === 'undefined') return '';
+    const path = window.location.pathname;
+    const search = window.location.search;
+    if (path.includes('/verify/')) {
+      return path.split('/verify/')[1]?.split('/')[0] || '';
+    }
+    if (search.includes('verify=')) {
+      const match = search.match(/verify=([^&]+)/);
+      return match ? decodeURIComponent(match[1]) : '';
+    }
+    return '';
+  });
+  const [viewMode, setViewMode] = useState<'app' | 'trust' | 'verify'>(() => {
+    if (typeof window === 'undefined') return 'app';
+    const path = window.location.pathname;
+    const search = window.location.search;
+    if (path.includes('/verify/') || search.includes('verify=')) return 'verify';
+    if (
+      path.includes('trust') ||
+      window.location.hash.includes('trust') ||
+      path.includes('lookup') ||
+      search.includes('trust')
+    ) {
+      return 'trust';
+    }
+    return 'app';
   });
 
   const [scans, setScans] = useState<ScanResult[]>(MOCK_SCANS);
@@ -157,6 +175,18 @@ export function App() {
     setActiveScan(scan);
     setActiveTab('results');
   };
+
+  if (viewMode === 'verify') {
+    return (
+      <PublicVerificationView
+        verificationId={verifyId}
+        onBack={() => {
+          setViewMode('app');
+          window.history.pushState({}, '', '/');
+        }}
+      />
+    );
+  }
 
   if (viewMode === 'trust') {
     return <TrustLookupPage onBackToLogin={() => setViewMode('app')} />;

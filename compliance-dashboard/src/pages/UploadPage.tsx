@@ -1,6 +1,12 @@
 import React, { useState } from 'react';
 import { UploadCloud, FolderUp, Globe, FileImage, CheckCircle, Loader2, Play, Smartphone, Sparkles } from 'lucide-react';
-import { queueEcommerceCategoryScan, uploadBatchFiles, uploadSingleScan } from '../services/api';
+import {
+  queueEcommerceCategoryScan,
+  uploadBatchFiles,
+  uploadSingleScan,
+  scanEcommerceProduct,
+  scanEcommerceCategory,
+} from '../services/api';
 import { ARMobileCaptureModal } from '../components/ARMobileCaptureModal';
 import type { ScanResult } from '../types';
 
@@ -32,9 +38,11 @@ export const UploadPage = ({ onScanCompleted, onBatchQueued, onBatchCompleted }:
   const [batchCategory, setBatchCategory] = useState('General');
 
   // E-Commerce Scan State
-  const [categoryUrl, setCategoryUrl] = useState('https://www.amazon.in/s?k=packaged+biscuits');
+  const [ecomSubMode, setEcomSubMode] = useState<'product' | 'category'>('product');
+  const [categoryUrl, setCategoryUrl] = useState('https://www.amazon.in/dp/B072LQ7RLS');
   const [maxPages, setMaxPages] = useState(1);
   const [loadingEcom, setLoadingEcom] = useState(false);
+  const [ecomStage, setEcomStage] = useState<number>(0);
 
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -128,14 +136,51 @@ export const UploadPage = ({ onScanCompleted, onBatchQueued, onBatchCompleted }:
 
     setLoadingEcom(true);
     setError(null);
+    setSuccessMsg(null);
+    setEcomStage(1);
+
+    const stageTimer = setInterval(() => {
+      setEcomStage((prev) => (prev < 4 ? prev + 1 : prev));
+    }, 2000);
+
     try {
-      const res = await queueEcommerceCategoryScan(categoryUrl, maxPages);
-      setSuccessMsg(`E-Commerce scraper queued successfully! Batch ID: ${res.batch_id}`);
-      onBatchQueued(res.batch_id);
+      const maxItemsToScrape = maxPages * 5;
+      const isCat =
+        ecomSubMode === 'category' ||
+        categoryUrl.includes('/s?') ||
+        categoryUrl.includes('/category/') ||
+        categoryUrl.includes('/browse/') ||
+        categoryUrl.includes('/b/');
+
+      if (isCat) {
+        const res = await scanEcommerceCategory(categoryUrl, maxItemsToScrape, batchCategory || 'Packaged Foods');
+        setEcomStage(5);
+        if (res && res.results && res.results.length > 0) {
+          setSuccessMsg(
+            `Category Audit Complete: ${res.total_scanned} products inspected (${res.compliant_count} Compliant, ${res.non_compliant_count} Non-Compliant). Loading primary docket...`
+          );
+          onScanCompleted(res.results[0]);
+        } else {
+          const qRes = await queueEcommerceCategoryScan(categoryUrl, maxPages);
+          setSuccessMsg(`Category scan queued. Batch ID: ${qRes.batch_id}`);
+          onBatchQueued(qRes.batch_id);
+        }
+      } else {
+        const res = await scanEcommerceProduct(categoryUrl, batchCategory || 'Packaged Foods', maxItemsToScrape);
+        setEcomStage(5);
+        if (res.primary_result) {
+          setSuccessMsg(`Successfully audited ${res.product_title}! (${res.total_scanned} packaging images evaluated)`);
+          onScanCompleted(res.primary_result);
+        } else {
+          setError('No statutory packaging declarations were detected on this product page.');
+        }
+      }
     } catch (err: any) {
-      setError(err.message || 'Failed to queue e-commerce scan task.');
+      setError(err.message || 'Failed to audit e-commerce URL. Please ensure the link is publicly accessible.');
     } finally {
+      clearInterval(stageTimer);
       setLoadingEcom(false);
+      setEcomStage(0);
     }
   };
 
@@ -361,63 +406,171 @@ export const UploadPage = ({ onScanCompleted, onBatchQueued, onBatchCompleted }:
         </form>
       )}
 
-      {/* Tab 3: E-Commerce Category Scan */}
+      {/* Tab 3: E-Commerce Category / Product Live Audit */}
       {activeTab === 'ecommerce' && (
         <form onSubmit={handleEcomSubmit} className="bg-white border border-[#D8D2C6] p-6 sm:p-8 space-y-6">
           <div>
-            <label className="block text-xs font-mono uppercase font-semibold text-[#1C2B3A] mb-2">
-              E-Commerce Category Listing URL
-            </label>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2.5">
+              <label className="block text-xs font-mono uppercase font-semibold text-[#1C2B3A]">
+                Target E-Commerce URL
+              </label>
+              <div className="inline-flex p-0.5 bg-[#F7F5F0] border border-[#D8D2C6]">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEcomSubMode('product');
+                    setCategoryUrl('https://www.amazon.in/dp/B072LQ7RLS');
+                  }}
+                  className={`px-3 py-1 text-xs font-semibold tracking-wide transition-all ${
+                    ecomSubMode === 'product'
+                      ? 'bg-[#1C2B3A] text-white'
+                      : 'text-[#5A6E82] hover:text-[#1C2B3A]'
+                  }`}
+                >
+                  Single Product Audit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEcomSubMode('category');
+                    setCategoryUrl('https://www.amazon.in/s?k=packaged+biscuits');
+                  }}
+                  className={`px-3 py-1 text-xs font-semibold tracking-wide transition-all ${
+                    ecomSubMode === 'category'
+                      ? 'bg-[#1C2B3A] text-white'
+                      : 'text-[#5A6E82] hover:text-[#1C2B3A]'
+                  }`}
+                >
+                  Category Surveillance
+                </button>
+              </div>
+            </div>
+
             <div className="relative">
               <Globe className="w-5 h-5 text-[#5A6E82] absolute left-3.5 top-1/2 -translate-y-1/2" />
               <input
                 type="url"
                 required
                 value={categoryUrl}
-                onChange={e => setCategoryUrl(e.target.value)}
-                placeholder="https://www.amazon.in/s?k=packaged+biscuits"
+                onChange={(e) => setCategoryUrl(e.target.value)}
+                placeholder={
+                  ecomSubMode === 'product'
+                    ? 'https://www.amazon.in/dp/B072LQ7RLS or Flipkart / Blinkit product URL'
+                    : 'https://www.amazon.in/s?k=cookies or https://www.flipkart.com/search?...'
+                }
                 className="w-full pl-11 pr-4 py-3 bg-white border border-[#D8D2C6] text-[#1C2B3A] text-sm font-mono focus:outline-none focus:border-[#1C2B3A]"
               />
             </div>
+
+            {/* Quick Demo Preset Links */}
+            <div className="flex flex-wrap items-center gap-2 mt-2 text-[11px] font-mono">
+              <span className="text-[#5A6E82]">Presets:</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setEcomSubMode('product');
+                  setCategoryUrl('https://www.amazon.in/dp/B072LQ7RLS');
+                }}
+                className="text-[#1C2B3A] underline hover:text-blue-700"
+              >
+                Amazon Cookies (Single)
+              </button>
+              <span>•</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setEcomSubMode('product');
+                  setCategoryUrl('https://www.flipkart.com/cadbury-dairy-milk-chocolate-bars/p/itmf3z8q');
+                }}
+                className="text-[#1C2B3A] underline hover:text-blue-700"
+              >
+                Flipkart Confectionery
+              </button>
+              <span>•</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setEcomSubMode('category');
+                  setCategoryUrl('https://www.amazon.in/s?k=packaged+biscuits');
+                }}
+                className="text-[#1C2B3A] underline hover:text-blue-700"
+              >
+                Amazon Category (Batch)
+              </button>
+            </div>
             <p className="text-xs text-[#5A6E82] mt-2">
-              Audits Rule 6(10) mandatory declarations across Amazon, Flipkart, BigBasket, and Zepto.
+              {ecomSubMode === 'product'
+                ? 'Extracts online declarations, downloads packaging specimen gallery, performs OCR, and conducts Rule 6(10) cross-validation.'
+                : 'Audits Rule 6(10) mandatory declarations across Amazon, Flipkart, BigBasket, Blinkit, and Zepto.'}
             </p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-mono uppercase font-semibold text-[#1C2B3A] mb-2">
-                Max Catalog Pages
+                Audit Scope Depth
               </label>
               <select
                 value={maxPages}
-                onChange={e => setMaxPages(parseInt(e.target.value))}
+                onChange={(e) => setMaxPages(parseInt(e.target.value))}
                 className="w-full px-3.5 py-2.5 bg-white border border-[#D8D2C6] text-[#1C2B3A] text-sm focus:outline-none focus:border-[#1C2B3A]"
               >
-                <option value={1}>1 Page (~20 items)</option>
-                <option value={2}>2 Pages (~40 items)</option>
-                <option value={3}>3 Pages (~60 items)</option>
-                <option value={5}>5 Pages (~100 items)</option>
+                <option value={1}>Quick Audit (Top 5 Specimen Images)</option>
+                <option value={2}>Standard Audit (Top 10 Specimen Images)</option>
+                <option value={3}>Exhaustive Audit (Top 15 Specimen Images)</option>
               </select>
             </div>
             <div>
               <label className="block text-xs font-mono uppercase font-semibold text-[#1C2B3A] mb-2">
-                Surveillance Worker
+                Forensic Engine
               </label>
               <div className="px-3.5 py-2.5 bg-[#F7F5F0] border border-[#D8D2C6] text-xs font-mono text-[#1C2B3A] flex items-center justify-between">
-                <span>Scrapy + Celery Redis Worker</span>
+                <span>Multi-Modal OCR + Cross-Validation</span>
                 <span className="w-2 h-2 bg-[#2F6F4E] animate-pulse" />
               </div>
             </div>
           </div>
+
+          {/* Live Progress Stage Tracker */}
+          {loadingEcom && (
+            <div className="p-4 bg-[#FAF8F5] border border-[#D8D2C6] space-y-3 font-mono text-xs">
+              <div className="flex items-center justify-between text-[#1C2B3A]">
+                <span className="font-bold flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin text-[#1C2B3A]" />
+                  Live E-Commerce Surveillance Pipeline
+                </span>
+                <span className="text-[#5A6E82]">Step {ecomStage || 1} of 4</span>
+              </div>
+              <div className="w-full bg-[#EAE6DE] h-1.5 border border-[#D8D2C6]">
+                <div
+                  className="bg-[#1C2B3A] h-full transition-all duration-500"
+                  style={{ width: `${Math.min(ecomStage * 25, 100)}%` }}
+                />
+              </div>
+              <p className="text-[11px] text-[#5A6E82]">
+                {ecomStage === 1 && '1. Scraping product metadata and high-resolution packaging gallery...'}
+                {ecomStage === 2 && '2. Running multi-engine OCR across all packaging panels...'}
+                {ecomStage === 3 && '3. Performing Rule 6(10) packaging vs web cross-validation...'}
+                {ecomStage >= 4 && '4. Enriching AI product intelligence & compiling forensic docket...'}
+              </p>
+            </div>
+          )}
 
           <button
             type="submit"
             disabled={loadingEcom || !categoryUrl}
             className="w-full py-3.5 px-6 bg-[#1C2B3A] hover:bg-[#2A3F55] text-white font-semibold text-sm border border-[#1C2B3A] transition-all flex items-center justify-center gap-2 disabled:opacity-50"
           >
-            {loadingEcom ? <Loader2 className="w-5 h-5 animate-spin" /> : <Play className="w-5 h-5 fill-current" />}
-            {loadingEcom ? 'Scraping E-Commerce Catalog...' : 'Launch Automated Compliance Scraper'}
+            {loadingEcom ? (
+              <Loader2 className="w-5 h-5 animate-spin" />
+            ) : (
+              <Play className="w-5 h-5 fill-current" />
+            )}
+            {loadingEcom
+              ? 'Executing Live Forensic Audit...'
+              : ecomSubMode === 'product'
+              ? 'Audit E-Commerce Product Specimen'
+              : 'Audit E-Commerce Category Catalog'}
           </button>
         </form>
       )}

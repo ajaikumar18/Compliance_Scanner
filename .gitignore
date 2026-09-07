@@ -28,3 +28,10 @@ yarn-error.log*
 # OS Metadata
 .DS_Store
 Thumbs.db
+
+# Database / SQLite
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3

@@ -30,7 +30,7 @@ export const Navbar = ({
                 labelGuard AI
               </span>
               <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded-none bg-[#24374A] text-[#DFBF82] border border-[#3A5066]">
-                Audit v1.0
+                Suite v3.0
               </span>
             </div>
             <p className="text-[10px] text-[#A6B5C5] font-sans tracking-wide">

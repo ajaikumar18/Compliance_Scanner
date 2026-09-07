@@ -144,6 +144,91 @@ def load_legal_metrology_rules() -> dict[str, Any]:
     return DEFAULT_LEGAL_RULES
 
 
+def parse_and_validate_dates(date_text: str) -> dict[str, Any]:
+    """
+    Parse date strings from multiple formats (DD/MM/YYYY, DD/MM/YY, DD-Mon-YYYY, MM/YYYY),
+    distinguish PKD/MFG from USE_BY/EXPIRY, and check against current inspection date.
+    """
+    from datetime import datetime, date
+
+    result = {
+        "mfg_date": None,
+        "use_by_date": None,
+        "is_expired": False,
+        "raw_text": date_text,
+        "status": "VALID",
+    }
+
+    if not date_text:
+        return result
+
+    # Standardize uppercase for regex
+    text_up = date_text.upper()
+
+    # Look for dates
+    month_names_re = r'(?:JAN(?:UARY)?|FEB(?:RUARY)?|MAR(?:CH)?|APR(?:IL)?|MAY|JUN(?:E)?|JUL(?:Y)?|AUG(?:UST)?|SEP(?:TEMBER)?|OCT(?:OBER)?|NOV(?:EMBER)?|DEC(?:EMBER)?)'
+    date_matches = re.findall(
+        rf'\b(\d{{1,2}})[\/\-\.](\d{{1,2}})[\/\-\.](\d{{2,4}})\b|\b(?:(\d{{1,2}})\s+)?({month_names_re})\.?(?:\s+|\/|\-|\.\s*)(\d{{2,4}})\b|\b(\d{{1,2}})[\/\-\.]((?:20)?\d{{2}})\b',
+        text_up,
+    )
+
+    parsed_dates = []
+    month_map = {
+        "JAN": 1, "FEB": 2, "MAR": 3, "APR": 4, "MAY": 5, "JUN": 6,
+        "JUL": 7, "AUG": 8, "SEP": 9, "OCT": 10, "NOV": 11, "DEC": 12
+    }
+
+    for m in date_matches:
+        try:
+            if m[0] and m[1] and m[2]:  # DD/MM/YY or DD/MM/YYYY
+                d, mo, yr = int(m[0]), int(m[1]), int(m[2])
+                if yr < 100:
+                    yr += 2000
+                if 1 <= mo <= 12 and 1 <= d <= 31:
+                    parsed_dates.append(date(yr, mo, d))
+            elif m[4] and m[5]:  # DD Mon YYYY or Mon YYYY
+                d = int(m[3]) if m[3] else 1
+                mo_name = m[4][:3].upper()
+                yr = int(m[5])
+                mo = month_map.get(mo_name, 1)
+                if yr < 100:
+                    yr += 2000
+                if 1 <= mo <= 12 and 1 <= d <= 31:
+                    parsed_dates.append(date(yr, mo, d))
+            elif m[6] and m[7]:  # MM/YY
+                mo, yr = int(m[6]), int(m[7])
+                if yr < 100:
+                    yr += 2000
+                if 1 <= mo <= 12:
+                    parsed_dates.append(date(yr, mo, 1))
+        except Exception:
+            continue
+
+    today = date.today()
+
+    # If multiple dates found, smaller is usually MFG/PKD and later is USE_BY
+    if len(parsed_dates) >= 2:
+        sorted_d = sorted(parsed_dates)
+        result["mfg_date"] = sorted_d[0].isoformat()
+        result["use_by_date"] = sorted_d[-1].isoformat()
+        if sorted_d[-1] < today:
+            result["is_expired"] = True
+            result["status"] = "EXPIRED"
+    elif len(parsed_dates) == 1:
+        single_date = parsed_dates[0]
+        if "USE BY" in text_up or "EXP" in text_up or "BEST BEFORE" in text_up:
+            result["use_by_date"] = single_date.isoformat()
+            if single_date < today:
+                result["is_expired"] = True
+                result["status"] = "EXPIRED"
+        else:
+            result["mfg_date"] = single_date.isoformat()
+    else:
+        result["status"] = "NO_VALID_DATE"
+
+    return result
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Compliance Evaluation Engine
 # ─────────────────────────────────────────────────────────────────────────────

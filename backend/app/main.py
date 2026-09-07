@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.core.database import engine
-from app.routers import auth, health, ledger, reports, scans, tickets
+from app.routers import auth, health, intelligence, ledger, reports, scans, tickets
 
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -82,6 +82,7 @@ app.add_middleware(
 # ── Routers ───────────────────────────────────────────────────────────────────
 app.include_router(auth.router)
 app.include_router(health.router)
+app.include_router(intelligence.router)
 app.include_router(ledger.router)
 app.include_router(reports.router)
 app.include_router(scans.router)
