@@ -13,7 +13,9 @@ import {
   Bot,
   Sparkles,
   Layers,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Loader2,
+  FolderArchive
 } from 'lucide-react';
 import { BoundingBoxCanvas } from '../components/BoundingBoxCanvas';
 import { QRVerificationModal } from '../components/QRVerificationModal';
@@ -24,7 +26,7 @@ import { PackageDamageCard } from '../components/PackageDamageCard';
 import { ConsumptionPredictorCard } from '../components/ConsumptionPredictorCard';
 import { NutritionDashboardCard } from '../components/NutritionDashboardCard';
 import { AudienceSuitabilityCard } from '../components/AudienceSuitabilityCard';
-import { getReportDownloadUrl } from '../services/api';
+import { downloadScanReport, downloadBatchReport } from '../services/api';
 import { useLanguage } from '../i18n/i18nContext';
 import { metrologyAdvisorEngine } from '../services/metrologyAdvisorEngine';
 import type { ScanResult, PackageDamageAnalysis } from '../types';
@@ -43,6 +45,46 @@ export const ScanResultPage = ({ scan, onBackToHistory }: ScanResultPageProps) =
   const [showQRModal, setShowQRModal] = useState(false);
   const [showChatModal, setShowChatModal] = useState(false);
   const [selectedGalleryIdx, setSelectedGalleryIdx] = useState<number>(0);
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
+  const [isDownloadingDocx, setIsDownloadingDocx] = useState(false);
+  const [isDownloadingBatch, setIsDownloadingBatch] = useState(false);
+
+  const handleDownloadPdf = async () => {
+    setIsDownloadingPdf(true);
+    try {
+      await downloadScanReport(currentScan.scan_id, 'pdf', currentScan);
+    } catch (err: any) {
+      alert('Could not download PDF report: ' + (err.message || err));
+    } finally {
+      setIsDownloadingPdf(false);
+    }
+  };
+
+  const handleDownloadDocx = async () => {
+    setIsDownloadingDocx(true);
+    try {
+      await downloadScanReport(currentScan.scan_id, 'docx', currentScan);
+    } catch (err: any) {
+      alert('Could not download DOCX report: ' + (err.message || err));
+    } finally {
+      setIsDownloadingDocx(false);
+    }
+  };
+
+  const handleDownloadBatch = async () => {
+    setIsDownloadingBatch(true);
+    try {
+      await downloadBatchReport({
+        scans: [currentScan],
+        batchTitle: `Docket for ${currentScan.product_name}`,
+        batchId: String(currentScan.batch_code || currentScan.scan_id),
+      });
+    } catch (err: any) {
+      alert('Could not download Batch PDF docket: ' + (err.message || err));
+    } finally {
+      setIsDownloadingBatch(false);
+    }
+  };
 
   useEffect(() => {
     setCurrentScan(scan);
@@ -204,25 +246,50 @@ export const ScanResultPage = ({ scan, onBackToHistory }: ScanResultPageProps) =
             />
 
             {/* Official Report Download Buttons */}
-            <a
-              href={getReportDownloadUrl(currentScan.scan_id, 'pdf')}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 px-3 py-2 rounded-none bg-[#F7F5F0] hover:bg-[#EBE7DF] text-[#1C2B3A] text-xs font-semibold tracking-wide border border-[#D8D2C6] transition-all"
+            <button
+              onClick={handleDownloadPdf}
+              disabled={isDownloadingPdf}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-none bg-[#F7F5F0] hover:bg-[#EBE7DF] text-[#1C2B3A] text-xs font-semibold tracking-wide border border-[#D8D2C6] transition-all disabled:opacity-50"
+              title="Download Certified PDF Compliance Report"
             >
-              <Download className="w-3.5 h-3.5 text-[#5A6E82]" />
-              PDF
-            </a>
+              {isDownloadingPdf ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-[#1C2B3A]" />
+              ) : (
+                <Download className="w-3.5 h-3.5 text-[#5A6E82]" />
+              )}
+              {isDownloadingPdf ? 'Generating...' : 'PDF'}
+            </button>
 
-            <a
-              href={getReportDownloadUrl(currentScan.scan_id, 'docx')}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 px-3 py-2 rounded-none bg-[#F7F5F0] hover:bg-[#EBE7DF] text-[#1C2B3A] text-xs font-semibold tracking-wide border border-[#D8D2C6] transition-all"
+            <button
+              onClick={handleDownloadDocx}
+              disabled={isDownloadingDocx}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-none bg-[#F7F5F0] hover:bg-[#EBE7DF] text-[#1C2B3A] text-xs font-semibold tracking-wide border border-[#D8D2C6] transition-all disabled:opacity-50"
+              title="Download Editable Word DOCX Report"
             >
-              <FileText className="w-3.5 h-3.5 text-[#5A6E82]" />
-              DOCX
-            </a>
+              {isDownloadingDocx ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-[#1C2B3A]" />
+              ) : (
+                <FileText className="w-3.5 h-3.5 text-[#5A6E82]" />
+              )}
+              {isDownloadingDocx ? 'Generating...' : 'DOCX'}
+            </button>
+
+            {/* Batch Docket Button if part of batch */}
+            {(currentScan.scan_type === 'batch' || currentScan.batch_code) && (
+              <button
+                onClick={handleDownloadBatch}
+                disabled={isDownloadingBatch}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-none bg-[#EAE6DE] hover:bg-[#DFDBD3] text-[#1C2B3A] text-xs font-semibold tracking-wide border border-[#C5BFB3] transition-all disabled:opacity-50"
+                title="Download Consolidated Batch Docket PDF"
+              >
+                {isDownloadingBatch ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-[#1C2B3A]" />
+                ) : (
+                  <FolderArchive className="w-3.5 h-3.5 text-[#1C2B3A]" />
+                )}
+                {isDownloadingBatch ? 'Compiling...' : 'Batch Docket'}
+              </button>
+            )}
           </div>
         </div>
       </div>

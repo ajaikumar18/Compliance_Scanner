@@ -3,8 +3,8 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   BarChart, Bar, Cell
 } from 'recharts';
-import { FileText, Search, Download, ExternalLink } from 'lucide-react';
-import { getReportDownloadUrl } from '../services/api';
+import { FileText, Search, Download, ExternalLink, Loader2 } from 'lucide-react';
+import { downloadScanReport, downloadBatchReport } from '../services/api';
 import { ReInspectionQueue } from '../components/ReInspectionQueue';
 import type { ScanResult } from '../types';
 
@@ -17,6 +17,33 @@ export const AnalyticsPage = ({ scans, onSelectScan }: AnalyticsPageProps) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [isDownloadingBatch, setIsDownloadingBatch] = useState(false);
+  const [downloadingScanId, setDownloadingScanId] = useState<string | number | null>(null);
+
+  const handleDownloadBatchPdf = async () => {
+    setIsDownloadingBatch(true);
+    try {
+      await downloadBatchReport({
+        scans: filteredScans.length > 0 ? filteredScans : scans,
+        batchTitle: 'Consolidated Compliance Audit Docket',
+      });
+    } catch (err: any) {
+      alert('Could not download batch PDF docket: ' + (err.message || err));
+    } finally {
+      setIsDownloadingBatch(false);
+    }
+  };
+
+  const handleDownloadSingleScan = async (scan: ScanResult) => {
+    setDownloadingScanId(scan.scan_id);
+    try {
+      await downloadScanReport(scan.scan_id, 'pdf', scan);
+    } catch (err: any) {
+      alert('Could not download PDF report: ' + (err.message || err));
+    } finally {
+      setDownloadingScanId(null);
+    }
+  };
 
   const handleInspectTriggerScan = (scanId: number) => {
     const found = scans.find(s => s.scan_id === scanId);
@@ -90,8 +117,23 @@ export const AnalyticsPage = ({ scans, onSelectScan }: AnalyticsPageProps) => {
               Statutory verification under the Legal Metrology (Packaged Commodities) Rules 2011.
             </p>
           </div>
-          <div className="text-xs font-mono text-[#5E6E80] bg-[#FAF8F5] px-3 py-1 border border-[#D8D2C6]">
-            OFFICIAL LEDGER • REGISTER NO. LM-2026-IN
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <button
+              onClick={handleDownloadBatchPdf}
+              disabled={isDownloadingBatch || filteredScans.length === 0}
+              className="px-3 py-1.5 bg-[#1C2B3A] text-white hover:bg-[#2E3F50] transition-colors inline-flex items-center gap-1.5 text-xs font-serif font-semibold tracking-wide disabled:opacity-50 rounded-none shadow-sm"
+              title="Download consolidated PDF docket for filtered scans"
+            >
+              {isDownloadingBatch ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Download className="w-3.5 h-3.5" />
+              )}
+              <span>Export Batch PDF Docket</span>
+            </button>
+            <div className="text-xs font-mono text-[#5E6E80] bg-[#FAF8F5] px-3 py-1.5 border border-[#D8D2C6]">
+              OFFICIAL LEDGER • REGISTER NO. LM-2026-IN
+            </div>
           </div>
         </div>
       </div>
@@ -337,15 +379,18 @@ export const AnalyticsPage = ({ scans, onSelectScan }: AnalyticsPageProps) => {
                         Inspect
                       </button>
 
-                      <a
-                        href={getReportDownloadUrl(scan.scan_id, 'pdf')}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="p-1.5 border border-[#D8D2C6] hover:bg-[#EFECE6] text-[#1C2B3A] inline-block rounded-none transition-colors"
+                      <button
+                        onClick={() => handleDownloadSingleScan(scan)}
+                        disabled={downloadingScanId === scan.scan_id}
+                        className="p-1.5 border border-[#D8D2C6] hover:bg-[#EFECE6] text-[#1C2B3A] inline-block rounded-none transition-colors disabled:opacity-50"
                         title="Download Certified PDF Report"
                       >
-                        <Download className="w-3.5 h-3.5" />
-                      </a>
+                        {downloadingScanId === scan.scan_id ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-[#1C2B3A]" />
+                        ) : (
+                          <Download className="w-3.5 h-3.5" />
+                        )}
+                      </button>
                     </td>
                   </tr>
                 );

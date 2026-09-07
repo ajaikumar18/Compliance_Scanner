@@ -309,8 +309,107 @@ export const MOCK_TICKETS: ReInspectionTicket[] = [
   },
 ];
 
-export function getReportDownloadUrl(scanId: number, format: 'pdf' | 'docx'): string {
-  return `${API_BASE_URL}/reports/${scanId}/${format}`;
+export function getReportDownloadUrl(scanId: number | string, format: 'pdf' | 'docx'): string {
+  return `${API_BASE_URL}/reports/${encodeURIComponent(String(scanId))}/${format}`;
+}
+
+export function getBatchReportDownloadUrl(scanIds?: (string | number)[]): string {
+  if (scanIds && scanIds.length > 0) {
+    const idsParam = scanIds.map(id => String(id)).join(',');
+    return `${API_BASE_URL}/reports/batch/pdf?scan_ids=${encodeURIComponent(idsParam)}`;
+  }
+  return `${API_BASE_URL}/reports/batch/pdf`;
+}
+
+function _triggerBrowserDownload(blob: Blob, filename: string): void {
+  const blobUrl = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = blobUrl;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  setTimeout(() => window.URL.revokeObjectURL(blobUrl), 1000);
+}
+
+/**
+ * Programmatically download single scan report (PDF or DOCX) with fallback payload support
+ */
+export async function downloadScanReport(
+  scanId: number | string,
+  format: 'pdf' | 'docx' = 'pdf',
+  fallbackScan?: ScanResult
+): Promise<void> {
+  const cleanId = String(scanId).replace(/[\s/]/g, '_');
+  const filename = `compliance_report_${cleanId}.${format}`;
+
+  try {
+    const url = getReportDownloadUrl(scanId, format);
+    const response = await fetch(url, {
+      method: 'GET',
+    });
+
+    if (response.ok) {
+      const blob = await response.blob();
+      _triggerBrowserDownload(blob, filename);
+      return;
+    }
+
+    // If GET by ID fails and format is PDF and fallbackScan is provided, try on-the-fly POST
+    if (format === 'pdf' && fallbackScan) {
+      const postResp = await fetch(`${API_BASE_URL}/reports/pdf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scan: fallbackScan }),
+      });
+      if (postResp.ok) {
+        const blob = await postResp.blob();
+        _triggerBrowserDownload(blob, filename);
+        return;
+      }
+    }
+
+    throw new Error(`Server returned HTTP ${response.status} generating ${format.toUpperCase()} report.`);
+  } catch (err: any) {
+    console.error(`Failed to download report:`, err);
+    throw err;
+  }
+}
+
+/**
+ * Programmatically download multi-specimen batch PDF audit docket
+ */
+export async function downloadBatchReport(options: {
+  scanIds?: (string | number)[];
+  scans?: ScanResult[];
+  batchTitle?: string;
+  batchId?: string;
+}): Promise<void> {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 16);
+  const filename = `batch_compliance_docket_${timestamp}.pdf`;
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/reports/batch/pdf`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        scan_ids: options.scanIds ? options.scanIds.map(id => String(id)) : undefined,
+        scans: options.scans,
+        batch_title: options.batchTitle || 'Multi-Specimen Compliance Audit Docket',
+        batch_id: options.batchId,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to generate batch PDF report (HTTP ${response.status})`);
+    }
+
+    const blob = await response.blob();
+    _triggerBrowserDownload(blob, filename);
+  } catch (err: any) {
+    console.error('Batch report download error:', err);
+    throw err;
+  }
 }
 
 

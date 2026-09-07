@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { UploadCloud, FolderUp, Globe, FileImage, CheckCircle, Loader2, Play, Smartphone, Sparkles } from 'lucide-react';
+import { UploadCloud, FolderUp, Globe, FileImage, CheckCircle, Loader2, Play, Smartphone, Sparkles, Download } from 'lucide-react';
 import {
   queueEcommerceCategoryScan,
   uploadBatchFiles,
   uploadSingleScan,
   scanEcommerceProduct,
   scanEcommerceCategory,
+  downloadBatchReport,
 } from '../services/api';
 import { ARMobileCaptureModal } from '../components/ARMobileCaptureModal';
 import type { ScanResult } from '../types';
@@ -36,6 +37,8 @@ export const UploadPage = ({ onScanCompleted, onBatchQueued, onBatchCompleted }:
   const [batchFiles, setBatchFiles] = useState<File[]>([]);
   const [loadingBatch, setLoadingBatch] = useState(false);
   const [batchCategory, setBatchCategory] = useState('General');
+  const [completedBatchScans, setCompletedBatchScans] = useState<ScanResult[] | null>(null);
+  const [isDownloadingBatchReport, setIsDownloadingBatchReport] = useState(false);
 
   // E-Commerce Scan State
   const [ecomSubMode, setEcomSubMode] = useState<'product' | 'category'>('product');
@@ -106,6 +109,24 @@ export const UploadPage = ({ onScanCompleted, onBatchQueued, onBatchCompleted }:
     }
   };
 
+  const handleDownloadBatchReport = async () => {
+    if (!completedBatchScans || completedBatchScans.length === 0) return;
+    setIsDownloadingBatchReport(true);
+    try {
+      const scanIds = completedBatchScans.map(s => s.scan_id);
+      await downloadBatchReport({
+        scanIds,
+        scans: completedBatchScans,
+        batchTitle: `Batch Docket - ${batchCategory || 'General Commodities'}`,
+        batchId: `BATCH-${Date.now().toString().slice(-6)}`
+      });
+    } catch (err: any) {
+      setError(err.message || 'Failed to download batch docket PDF.');
+    } finally {
+      setIsDownloadingBatchReport(false);
+    }
+  };
+
   const handleBatchSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (batchFiles.length === 0) return;
@@ -116,6 +137,7 @@ export const UploadPage = ({ onScanCompleted, onBatchQueued, onBatchCompleted }:
       const results = await uploadBatchFiles(batchFiles, batchCategory);
       if (results && results.length > 0) {
         setSuccessMsg(`Successfully processed ${results.length} product scans!`);
+        setCompletedBatchScans(results);
         if (onBatchCompleted) {
           onBatchCompleted(results);
         } else {
@@ -403,6 +425,28 @@ export const UploadPage = ({ onScanCompleted, onBatchQueued, onBatchCompleted }:
             {loadingBatch ? <Loader2 className="w-5 h-5 animate-spin" /> : <Play className="w-5 h-5 fill-current" />}
             {loadingBatch ? `Auditing ${batchFiles.length} Files...` : `Process Batch Docket (${batchFiles.length} Images)`}
           </button>
+
+          {completedBatchScans && completedBatchScans.length > 0 && (
+            <div className="p-4 bg-[#EAF4EE] border border-[#9BC6AE] flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-xs text-[#2F6F4E] font-mono">
+                <CheckCircle className="w-4 h-4 text-[#2F6F4E] shrink-0" />
+                <span>{completedBatchScans.length} specimens analyzed. Official batch docket is ready:</span>
+              </div>
+              <button
+                type="button"
+                onClick={handleDownloadBatchReport}
+                disabled={isDownloadingBatchReport}
+                className="px-3.5 py-2 bg-[#1C2B3A] text-white hover:bg-[#2A3F55] text-xs font-serif font-bold tracking-wide flex items-center gap-2 transition-colors disabled:opacity-50 rounded-none shadow-sm shrink-0"
+              >
+                {isDownloadingBatchReport ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Download className="w-3.5 h-3.5" />
+                )}
+                Download Batch PDF Docket ({completedBatchScans.length})
+              </button>
+            </div>
+          )}
         </form>
       )}
 
