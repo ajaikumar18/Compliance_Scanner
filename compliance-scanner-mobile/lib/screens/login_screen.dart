@@ -72,7 +72,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
                 const SizedBox(height: 16),
                 const Text(
-                  'labelGuard AI Mobile',
+                  'InnoveXguard AI Mobile',
                   style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
                 ),
                 const SizedBox(height: 6),

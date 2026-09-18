@@ -688,7 +688,7 @@ export const TrustLookupPage: React.FC<TrustLookupPageProps> = ({ onBackToLogin 
       <footer className="border-t border-[#D8D2C6] bg-white py-5 px-6 text-center text-xs text-[#5A6E82] font-mono space-y-1">
         <div>Legal Metrology (Packaged Commodities) Rules 2011 & Consumer Protection Regulatory Engine</div>
         <div className="text-[11px] text-[#8A9AA8]">
-          labelGuard AI • Hardware-calibrated depth & statutory rule auditing
+          InnoveXguard AI • Hardware-calibrated depth & statutory rule auditing
         </div>
       </footer>
     </div>

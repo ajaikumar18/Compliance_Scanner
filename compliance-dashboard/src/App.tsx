@@ -315,7 +315,7 @@ export function App() {
       </main>
 
       <footer className="border-t border-[#D8D2C6] bg-white py-4 px-6 text-center text-xs text-[#5E6E80] font-mono">
-        labelGuard AI • Official Legal Metrology (Packaged Commodities) Compliance Platform • Rule 6, 7 & 8 Evidence Analyzer
+        InnoveXguard AI • Official Legal Metrology (Packaged Commodities) Compliance Platform • Rule 6, 7 & 8 Evidence Analyzer
       </footer>
     </div>
   );

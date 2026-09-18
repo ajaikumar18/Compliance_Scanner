@@ -26,7 +26,7 @@ class _ComplianceScannerAppState extends State<ComplianceScannerApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'labelGuard AI Mobile',
+      title: 'InnoveXguard AI Mobile',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         brightness: Brightness.dark,

@@ -238,7 +238,7 @@ def extract_via_openrouter_sync(
     headers = {
         "Authorization": f"Bearer {effective_key}",
         "HTTP-Referer": "http://localhost:5173",
-        "X-Title": "labelGuard AI",
+        "X-Title": "InnoveXguard AI",
         "Content-Type": "application/json",
     }
 

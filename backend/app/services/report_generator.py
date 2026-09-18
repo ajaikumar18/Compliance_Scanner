@@ -310,7 +310,7 @@ def _build_pdf_bytes(data: dict[str, Any]) -> bytes:
 
     # Title Banner & Header
     story.append(Paragraph("Legal Metrology Compliance Report", title_style))
-    story.append(Paragraph(f"labelGuard AI Official Certification • Docket #{data['scan_id']}", subtitle_style))
+    story.append(Paragraph(f"InnoveXguard AI Official Certification • Docket #{data['scan_id']}", subtitle_style))
     story.append(Spacer(1, 6))
     story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor("#CBD5E1"), spaceAfter=10))
 
@@ -476,7 +476,7 @@ def _build_pdf_bytes(data: dict[str, Any]) -> bytes:
     story.append(
         Paragraph(
             "<i>Evaluated under the Legal Metrology Act, 2009 & Packaged Commodities Rules, 2011 (as amended). "
-            "Generated automatically by labelGuard AI. Certified for legal metrology administrative enforcement.</i>",
+            "Generated automatically by InnoveXguard AI. Certified for legal metrology administrative enforcement.</i>",
             subtitle_style,
         )
     )
@@ -562,7 +562,7 @@ def generate_batch_pdf_report(
 
     # ── Executive Cover Page ──────────────────────────────────────────────────
     story.append(Paragraph("Legal Metrology Multi-Specimen Batch Audit Docket", title_style))
-    story.append(Paragraph(f"labelGuard AI • Consolidated Inspection Dossier • {batch_title}", subtitle_style))
+    story.append(Paragraph(f"InnoveXguard AI • Consolidated Inspection Dossier • {batch_title}", subtitle_style))
     story.append(Spacer(1, 6))
     story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor("#1E293B"), spaceAfter=10))
 
@@ -701,7 +701,7 @@ def generate_batch_pdf_report(
     story.append(Spacer(1, 14))
     story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#CBD5E1"), spaceAfter=8))
     cert_text = (
-        "<b>CERTIFICATE OF BATCH AUDIT:</b> This multi-specimen compliance docket was compiled via the labelGuard AI "
+        "<b>CERTIFICATE OF BATCH AUDIT:</b> This multi-specimen compliance docket was compiled via the InnoveXguard AI "
         "inspection engine. Evaluated in accordance with Schedule II font tolerances, Rule 6 statutory declarations, "
         "and Rule 12 standard quantity brackets under the Legal Metrology Act, 2009."
     )
@@ -740,7 +740,7 @@ def _build_docx_bytes(data: dict[str, Any]) -> bytes:
     title_run.font.color.rgb = RGBColor(30, 41, 59)
 
     sub_p = doc.add_paragraph()
-    sub_run = sub_p.add_run(f"labelGuard AI • Scan #{data['scan_id']}")
+    sub_run = sub_p.add_run(f"InnoveXguard AI • Scan #{data['scan_id']}")
     sub_run.font.name = "Calibri"
     sub_run.font.size = Pt(10)
     sub_run.font.color.rgb = RGBColor(100, 116, 139)

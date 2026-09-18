@@ -46,13 +46,13 @@ export const LoginPage = ({ onLoginSuccess, onOpenPublicTrust }: LoginPageProps)
             <Award className="w-8 h-8 text-[#DFBF82]" />
           </div>
           <span className="block text-[10px] font-mono uppercase tracking-widest text-[#5A6E82] font-bold">
-            LEGAL METROLOGY DIVISION • LABELGUARD AI
+            LEGAL METROLOGY DIVISION • INNOVEXGUARD AI
           </span>
           <h2 className="text-2xl font-serif font-bold text-[#1C2B3A] tracking-tight mt-1">
             Inspector Portal Login
           </h2>
           <p className="text-xs text-[#5A6E82] mt-1">
-            labelGuard AI – Statutory Packaging Compliance & Laboratory Calibration
+            InnoveXguard AI – Statutory Packaging Compliance & Laboratory Calibration
           </p>
         </div>
 

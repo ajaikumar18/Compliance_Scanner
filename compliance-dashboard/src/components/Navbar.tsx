@@ -27,7 +27,7 @@ export const Navbar = ({
           <div>
             <div className="flex items-center gap-2">
               <span className="text-lg font-bold font-serif tracking-tight text-[#F7F5F0]">
-                labelGuard AI
+                InnoveXguard AI
               </span>
               <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded-none bg-[#24374A] text-[#DFBF82] border border-[#3A5066]">
                 Suite v3.0

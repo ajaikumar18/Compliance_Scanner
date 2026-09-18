@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     OPENROUTER_TIMEOUT: float = 12.0  # Seconds; gemini-2.5-flash averages ~2.5s
 
     # ── App ───────────────────────────────────────────────────────────────────
-    APP_NAME: str = "labelGuard AI"
+    APP_NAME: str = "InnoveXguard AI"
     APP_VERSION: str = "3.0.2"
     DEBUG: bool = False
 
