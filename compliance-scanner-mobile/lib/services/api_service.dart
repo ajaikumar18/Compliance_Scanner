@@ -1,12 +1,25 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../models/scan_result.dart';
 import '../models/user.dart';
 
 class ApiService {
-  // Use 10.0.2.2 for Android Emulator, localhost for iOS/desktop, or custom backend URL
-  static String baseUrl = 'http://10.0.2.2:8000';
+  static String get defaultBaseUrl {
+    if (kIsWeb) {
+      return 'http://127.0.0.1:8000';
+    }
+    try {
+      if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+        return 'http://127.0.0.1:8000';
+      }
+    } catch (_) {}
+    return 'http://10.0.2.2:8000'; // Android emulator to host
+  }
+
+  // Use 10.0.2.2 for Android Emulator, 127.0.0.1 for desktop/web, or your LAN IP for physical device
+  static String baseUrl = defaultBaseUrl;
 
   static void setBaseUrl(String url) {
     baseUrl = url;
@@ -46,11 +59,21 @@ class ApiService {
     String category = 'Store Inspection',
     double? packageWidthMm,
     double? netQuantityG,
+    String submitterRole = 'inspector',
+    String? claimedViolationType,
+    String? imageSha256,
   }) async {
     final request = http.MultipartRequest('POST', Uri.parse('$baseUrl/scan/batch'));
     request.files.add(await http.MultipartFile.fromPath('files', imageFile.path));
     request.fields['scan_type'] = 'manual';
     request.fields['category'] = category;
+    request.fields['submitter_role'] = submitterRole;
+    if (claimedViolationType != null && claimedViolationType.isNotEmpty) {
+      request.fields['claimed_violation_type'] = claimedViolationType;
+    }
+    if (imageSha256 != null && imageSha256.isNotEmpty) {
+      request.fields['image_sha256'] = imageSha256;
+    }
     if (packageWidthMm != null) {
       request.fields['package_width_mm'] = packageWidthMm.toString();
     }
@@ -68,8 +91,17 @@ class ApiService {
         return ScanResult.fromJson(results.first as Map<String, dynamic>);
       }
     }
-    throw Exception('Failed to upload scan: ${response.statusCode}');
+
+    String errorMsg = 'Failed to upload scan: ${response.statusCode}';
+    try {
+      final errBody = jsonDecode(response.body);
+      if (errBody['detail'] != null) {
+        errorMsg = errBody['detail'].toString();
+      }
+    } catch (_) {}
+    throw Exception(errorMsg);
   }
+
 
   // ── Batch Image Scan ────────────────────────────────────────────────────────
   static Future<List<ScanResult>> uploadBatchImages(

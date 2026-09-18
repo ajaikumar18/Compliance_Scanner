@@ -56,6 +56,8 @@ class Scan(Base):
     )
     gtin: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
     batch_code: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    source: Mapped[str] = mapped_column(String(50), nullable=False, default="inspector", server_default="inspector")
+    claimed_violation_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     # Relationships
     product: Mapped["Product"] = relationship(  # noqa: F821

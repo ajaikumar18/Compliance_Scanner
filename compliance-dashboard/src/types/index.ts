@@ -5,7 +5,10 @@ export type ComplianceStatus = 'compliant' | 'non_compliant' | 'partial_review_n
 export interface User {
   id: number;
   username: string;
-  role: 'inspector' | 'admin' | 'viewer';
+  role: 'inspector' | 'admin' | 'viewer' | 'citizen';
+  token?: string;
+  xp?: number;
+  reputation_tier?: string;
 }
 
 export interface Violation {
@@ -125,6 +128,16 @@ export interface ScanResult {
   source_url?: string;
   scanned_image_url?: string;
   scan_type: 'manual' | 'batch' | 'ecommerce' | string;
+  source?: 'inspector' | 'citizen' | string;
+  claimed_violation_type?: string | null;
+  priority_check_result?: any;
+  report_generated?: boolean;
+  pdf_report_url?: string;
+  image_sha256?: string;
+  submitter_xp?: number;
+  xp_awarded?: number;
+  confirmation_message?: string;
+  reputation_tier?: string;
   gtin?: string | null;
   batch_code?: string | null;
   barcodes?: Array<{ text: string; format: string; gtin?: string | null; bbox?: [number, number, number, number] | null }>;
@@ -409,6 +422,8 @@ export interface ReInspectionTicket {
     severity: string;
     details: string;
   }>;
+  source?: 'inspector' | 'citizen' | string;
+  claimed_violation_type?: string | null;
 }
 
 export interface TicketSummaryStats {

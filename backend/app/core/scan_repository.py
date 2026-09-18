@@ -59,6 +59,16 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_scans_category ON scans(product_category);
             CREATE INDEX IF NOT EXISTS idx_scans_created ON scans(created_at);
 
+            # Add additive columns if they don't exist yet
+            for col_def in [
+                "ALTER TABLE scans ADD COLUMN source TEXT DEFAULT 'inspector'",
+                "ALTER TABLE scans ADD COLUMN claimed_violation_type TEXT",
+            ]:
+                try:
+                    conn.execute(col_def)
+                except sqlite3.OperationalError:
+                    pass
+
             CREATE TABLE IF NOT EXISTS audit_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 scan_uid TEXT,
@@ -196,9 +206,10 @@ class ScanRepository:
             )
             source_url = scan_data.get("source_url") or ""
 
-            # Standardize scan_data ID fields
             scan_data["scan_uid"] = scan_uid
             scan_data["scan_id"] = scan_uid
+            scan_data["source"] = scan_data.get("source", "inspector")
+            scan_data["claimed_violation_type"] = scan_data.get("claimed_violation_type")
             scan_data["created_at"] = scan_data.get("created_at") or now_iso
             scan_data["updated_at"] = now_iso
 

@@ -15,6 +15,7 @@ class UserRole(str, enum.Enum):
     inspector = "inspector"
     admin = "admin"
     viewer = "viewer"
+    citizen = "citizen"
 
 
 class User(Base):
@@ -27,6 +28,12 @@ class User(Base):
         Enum(UserRole, name="userrole"),
         nullable=False,
         default=UserRole.viewer,
+    )
+    xp: Mapped[int] = mapped_column(
+        Integer,
+        default=100,
+        server_default="100",
+        nullable=False,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -47,6 +54,17 @@ class User(Base):
         cascade="all, delete-orphan",
         lazy="selectin",
     )
+    notifications: Mapped[list["CitizenNotification"]] = relationship(  # noqa: F821
+        "CitizenNotification",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("xp", 100)
+        super().__init__(*args, **kwargs)
 
     def __repr__(self) -> str:
         return f"<User id={self.id} username={self.username!r} role={self.role}>"
+

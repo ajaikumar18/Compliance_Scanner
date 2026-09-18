@@ -23,6 +23,99 @@ class ResultScreen extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Citizen Evidence Confirmation & Gamification Banner
+              if (scanResult.confirmationMessage != null) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: (scanResult.xpAwarded ?? 0) > 0
+                        ? const Color(0xFF064E3B)
+                        : const Color(0xFF451A03),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: (scanResult.xpAwarded ?? 0) > 0
+                          ? const Color(0xFF10B981)
+                          : const Color(0xFFF59E0B),
+                      width: 1.5,
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            (scanResult.xpAwarded ?? 0) > 0 ? Icons.verified : Icons.info_outline,
+                            color: (scanResult.xpAwarded ?? 0) > 0 ? const Color(0xFF34D399) : const Color(0xFFFBBF24),
+                            size: 22,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              (scanResult.xpAwarded ?? 0) > 0 ? 'VIOLATION CONFIRMED' : 'CITIZEN CLAIM PROCESSED',
+                              style: TextStyle(
+                                color: (scanResult.xpAwarded ?? 0) > 0 ? const Color(0xFF34D399) : const Color(0xFFFBBF24),
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ),
+                          if (scanResult.xpAwarded != null && scanResult.xpAwarded! > 0)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF059669),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.star, color: Colors.amber, size: 14),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    '+${scanResult.xpAwarded} XP',
+                                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11),
+                                  ),
+                                ],
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        scanResult.confirmationMessage!,
+                        style: const TextStyle(color: Colors.white, fontSize: 13, height: 1.4),
+                      ),
+                      if (scanResult.currentXp != null) ...[
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            Text(
+                              'Citizen Trust: ${scanResult.currentXp} XP',
+                              style: const TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.w600),
+                            ),
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                              decoration: BoxDecoration(
+                                color: Colors.white10,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                scanResult.reputationTier ?? 'Citizen Scout',
+                                style: const TextStyle(color: AppColors.emeraldAccent, fontSize: 10),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(16),

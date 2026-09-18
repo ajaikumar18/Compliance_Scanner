@@ -1,10 +1,10 @@
-import { ShieldCheck, LayoutDashboard, UploadCloud, BarChart3, LogOut, User as UserIcon } from 'lucide-react';
+import { ShieldCheck, LayoutDashboard, UploadCloud, BarChart3, LogOut, User as UserIcon, Users } from 'lucide-react';
 import type { User } from '../types';
 
 interface NavbarProps {
   user: User | null;
-  activeTab: 'dashboard' | 'upload' | 'results' | 'analytics';
-  setActiveTab: (tab: 'dashboard' | 'upload' | 'results' | 'analytics') => void;
+  activeTab: 'dashboard' | 'upload' | 'results' | 'analytics' | 'citizen';
+  setActiveTab: (tab: 'dashboard' | 'upload' | 'results' | 'analytics' | 'citizen') => void;
   onLogout: () => void;
   onOpenPublicTrust?: () => void;
 }
@@ -64,6 +64,18 @@ export const Navbar = ({
             >
               <UploadCloud className="w-3.5 h-3.5" />
               New Ingestion
+            </button>
+
+            <button
+              onClick={() => setActiveTab('citizen')}
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-none text-xs font-medium transition-all ${
+                activeTab === 'citizen'
+                  ? 'bg-[#24374A] text-white border border-[#445B73]'
+                  : 'text-[#A6B5C5] hover:text-white hover:bg-[#1C2B3A]'
+              }`}
+            >
+              <Users className="w-3.5 h-3.5" />
+              Citizen Queue
             </button>
 
             <button

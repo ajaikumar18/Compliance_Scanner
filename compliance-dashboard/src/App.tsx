@@ -6,6 +6,7 @@ import { UploadPage } from './pages/UploadPage';
 import { ScanResultPage } from './pages/ScanResultPage';
 import { AnalyticsPage } from './pages/AnalyticsPage';
 import { TrustLookupPage } from './pages/TrustLookupPage';
+import { CitizenQueuePage } from './pages/CitizenQueuePage';
 import { PublicVerificationView } from './components/PublicVerificationView';
 import { fetchScans, getBatchStatus, MOCK_SCANS } from './services/api';
 
@@ -18,7 +19,7 @@ export function App() {
     role: 'inspector',
   });
   const [token, setToken] = useState<string | null>('demo-token');
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'upload' | 'results' | 'analytics'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'upload' | 'results' | 'analytics' | 'citizen'>('dashboard');
   const [verifyId] = useState<string>(() => {
     if (typeof window === 'undefined') return '';
     const path = window.location.pathname;
@@ -303,6 +304,13 @@ export function App() {
           <ScanResultPage
             scan={activeScan}
             onBackToHistory={() => setActiveTab('dashboard')}
+          />
+        )}
+
+        {activeTab === 'citizen' && (
+          <CitizenQueuePage
+            scans={scans}
+            onSelectScan={handleSelectScan}
           />
         )}
 

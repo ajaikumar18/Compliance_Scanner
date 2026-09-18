@@ -25,13 +25,17 @@ class Violation {
 }
 
 class ScanResult {
-  final int scanId;
+  final String scanId;
   final String productName;
   final String productCategory;
   final String complianceStatus;
   final int violationsCount;
   final List<Violation> violations;
   final String? sourceUrl;
+  final int? xpAwarded;
+  final int? currentXp;
+  final String? confirmationMessage;
+  final String? reputationTier;
 
   ScanResult({
     required this.scanId,
@@ -41,6 +45,10 @@ class ScanResult {
     required this.violationsCount,
     required this.violations,
     this.sourceUrl,
+    this.xpAwarded,
+    this.currentXp,
+    this.confirmationMessage,
+    this.reputationTier,
   });
 
   factory ScanResult.fromJson(Map<String, dynamic> json) {
@@ -50,13 +58,24 @@ class ScanResult {
         [];
 
     return ScanResult(
-      scanId: json['scan_id'] ?? 0,
+      scanId: json['scan_id']?.toString() ?? json['scan_uid']?.toString() ?? '0',
       productName: json['product_name'] ?? 'Product Scan',
-      productCategory: json['category'] ?? 'General',
+      productCategory: json['product_category'] ?? json['category'] ?? 'General',
       complianceStatus: json['compliance_status'] ?? 'compliant',
-      violationsCount: json['violations_count'] ?? vList.length,
+      violationsCount: json['violations_count'] is int
+          ? json['violations_count']
+          : (int.tryParse(json['violations_count']?.toString() ?? '') ?? vList.length),
       violations: vList,
-      sourceUrl: json['source_url'] ?? json['raw_image_url'],
+      sourceUrl: json['source_url'] ?? json['raw_image_url'] ?? json['scanned_image_url'],
+      xpAwarded: json['xp_awarded'] is int
+          ? json['xp_awarded']
+          : int.tryParse(json['xp_awarded']?.toString() ?? ''),
+      currentXp: json['current_xp'] is int
+          ? json['current_xp']
+          : int.tryParse(json['current_xp']?.toString() ?? ''),
+      confirmationMessage: json['confirmation_message']?.toString(),
+      reputationTier: json['reputation_tier']?.toString(),
     );
   }
 }
+

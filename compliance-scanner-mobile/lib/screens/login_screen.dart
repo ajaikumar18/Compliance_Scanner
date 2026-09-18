@@ -49,14 +49,90 @@ class _LoginScreenState extends State<LoginScreen> {
     widget.onLoginSuccess(user);
   }
 
+  void _showServerConfigDialog() {
+    final controller = TextEditingController(text: ApiService.baseUrl);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.slate800,
+        title: const Row(
+          children: [
+            Icon(Icons.wifi, color: AppColors.emeraldAccent),
+            SizedBox(width: 8),
+            Text('Server Connection', style: TextStyle(color: Colors.white, fontSize: 16)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Enter backend URL (laptop Wi-Fi IP and port 8000):',
+              style: TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              style: const TextStyle(color: Colors.white, fontSize: 14),
+              decoration: InputDecoration(
+                labelText: 'Backend URL',
+                labelStyle: const TextStyle(color: AppColors.slate400),
+                hintText: 'http://172.50.8.89:8000',
+                hintStyle: const TextStyle(color: Colors.white30),
+                filled: true,
+                fillColor: AppColors.slate900,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white60)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final newUrl = controller.text.trim();
+              if (newUrl.isNotEmpty) {
+                ApiService.setBaseUrl(newUrl);
+                setState(() {});
+                Navigator.pop(ctx);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Server set to: $newUrl'),
+                    backgroundColor: const Color(0xFF2F6F4E),
+                  ),
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.indigo600),
+            child: const Text('Save & Connect', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.slate900,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.settings_ethernet, color: AppColors.emeraldAccent),
+            tooltip: 'Server Connection Config',
+            onPressed: _showServerConfigDialog,
+          ),
+        ],
+      ),
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24.0),
+            padding: const EdgeInsets.symmetric(horizontal: 24.0),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -144,8 +220,10 @@ class _LoginScreenState extends State<LoginScreen> {
                 const SizedBox(height: 24),
 
                 // Demo Quick Sign-in
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  alignment: WrapAlignment.center,
                   children: [
                     OutlinedButton(
                       onPressed: () => _handleDemoLogin('inspector'),
@@ -156,7 +234,15 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                       child: const Text('Inspector Demo'),
                     ),
-                    const SizedBox(width: 12),
+                    OutlinedButton(
+                      onPressed: () => _handleDemoLogin('citizen'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.emeraldAccent,
+                        side: const BorderSide(color: AppColors.emeraldAccent),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      child: const Text('Citizen Demo'),
+                    ),
                     OutlinedButton(
                       onPressed: () => _handleDemoLogin('admin'),
                       style: OutlinedButton.styleFrom(

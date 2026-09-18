@@ -42,6 +42,8 @@ class ReInspectionTicketRead(BaseModel):
 
     # Optional nested trigger scan details
     trigger_scan_violations: list[dict[str, Any]] = Field(default_factory=list)
+    source: str = "inspector"
+    claimed_violation_type: str | None = None
 
 
 class ReInspectionTicketUpdate(BaseModel):

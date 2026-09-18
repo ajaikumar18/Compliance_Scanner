@@ -36,7 +36,10 @@ class _ComplianceScannerAppState extends State<ComplianceScannerApp> {
       ),
       home: _currentUser == null
           ? LoginScreen(onLoginSuccess: _handleLoginSuccess)
-          : const CaptureScreen(),
+          : CaptureScreen(
+              currentUser: _currentUser,
+              onLogout: () => setState(() => _currentUser = null),
+            ),
     );
   }
 }

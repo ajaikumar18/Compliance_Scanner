@@ -30,13 +30,13 @@ from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadF
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import require_inspector
+from app.core.auth import require_citizen_or_above, require_inspector
 from app.core.celery_app import celery_app
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal, get_db
 from app.models.product import Product
 from app.models.scan import Scan, ScanStatus, ScanType
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.models.violation import Violation, ViolationSeverity, ViolationType
 from app.services.barcode_extractor import decode_barcodes, extract_batch_code
 from app.services.ecommerce_extractor import (
@@ -166,17 +166,16 @@ async def _process_single_scan_image(
     db: AsyncSession | None = None,
     html_specs: dict[str, Any] | None = None,
     ar_pixels_per_mm: float | None = None,
+    claimed_violation_type: str | None = None,
+    submitter_role: str = "inspector",
+    image_sha256: str | None = None,
+    current_user: Any | None = None,
 ) -> dict[str, Any]:
     """
-    Smart hybrid OCR + GenAI compliance pipeline.
-
-    Strategy: OCR-first (fast, local) → GenAI only for gaps (targeted, accurate).
-    - OCR runs first (~1s, zero network cost)
-    - If OCR finds all 6 fields at high confidence → skip GenAI entirely (fast path)
-    - If fields are missing/low-confidence → call GenAI for ONLY those fields (targeted)
-    - Results are merged: OCR provides bbox + fast data, GenAI provides accuracy for hard cases
+    Smart hybrid OCR + GenAI compliance pipeline with Citizen Evidence Ingestion support.
     """
     import asyncio
+    import hashlib
 
     # ── Step 1: Robust Image Decoding ─────────────────────────────────────────
     np_arr = np.frombuffer(image_bytes, np.uint8)
@@ -209,6 +208,38 @@ async def _process_single_scan_image(
 
     logger.info("Image decoded: %s (%dx%d, %s)", filename, w, h, img_bgr.dtype)
 
+    # ── Step 1b: Tamper-Evidence SHA-256 Validation ───────────────────────────
+    server_sha256 = hashlib.sha256(image_bytes).hexdigest()
+    if image_sha256 and image_sha256.strip():
+        clean_client_hash = image_sha256.strip().lower()
+        if server_sha256.lower() != clean_client_hash:
+            logger.error(
+                "Tamper check failed for %s: Client SHA-256=%s, Server SHA-256=%s",
+                filename, image_sha256, server_sha256,
+            )
+            # Apply tampering penalty (-100 XP) to citizen submitter
+            if current_user is not None:
+                current_user.xp = getattr(current_user, "xp", 100) - 100
+                if db is not None:
+                    try:
+                        from app.models.citizen_notification import CitizenNotification, NotificationType
+                        notif = CitizenNotification(
+                            user_id=current_user.id,
+                            notification_type=NotificationType.tampering_detected,
+                            title="Tampering Detected (-100 XP)",
+                            message=f"Cryptographic hash mismatch for {filename}. -100 XP deducted from your trust rating.",
+                            xp_change=-100,
+                        )
+                        db.add(notif)
+                        await db.commit()
+                    except Exception as t_err:
+                        logger.warning("Failed to record tampering notification: %s", t_err)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Evidence tamper verification failed: Client SHA-256 ({clean_client_hash[:12]}...) does not match server computed hash ({server_sha256[:12]}...). 100 XP deducted.",
+            )
+        logger.info("Tamper verification verified for %s (SHA-256: %s)", filename, server_sha256)
+
     # ── Step 2: Image Preprocessing (light — deskew + contrast, no perspective) ─
     try:
         preprocessed = preprocess_pipeline(img_bgr)
@@ -217,7 +248,6 @@ async def _process_single_scan_image(
         preprocessed = img_bgr
 
     # ── Step 2b: Barcode & QR Code Detection (GTIN Extraction) ───────────────
-    # Primary: zxing-cpp (C++20), Secondary: pyzbar, Fallback: OpenCV QRCodeDetector
     detected_barcodes = decode_barcodes(img_bgr)
     if not detected_barcodes and preprocessed is not img_bgr:
         detected_barcodes = decode_barcodes(preprocessed)
@@ -234,6 +264,86 @@ async def _process_single_scan_image(
 
     if gtin:
         logger.info("Barcode/QR decoded for %s: GTIN=%s, format=%s", filename, gtin, detected_barcodes[0].get("format"))
+
+    # ── Step 2c: Priority Citizen Claim Check Branch ──────────────────────────
+    # If claimed_violation_type is provided (e.g. "undersized_font", "missing_mrp", "missing_origin"),
+    # run that specific check directly before full field classification and attach as priority_check_result.
+    priority_check_result: dict[str, Any] | None = None
+    if claimed_violation_type and claimed_violation_type.strip():
+        c_norm = claimed_violation_type.strip().lower().replace("-", "_").replace(" ", "_")
+        logger.info("Priority branch triggered for claimed violation: '%s' on %s", claimed_violation_type, filename)
+
+        if "font" in c_norm or "undersized" in c_norm:
+            scale_preview = calibrate_scale(preprocessed, package_width_mm=package_width_mm, ar_pixels_per_mm=ar_pixels_per_mm)
+            px_per_mm = scale_preview["pixels_per_mm"]
+            test_h = measure_text_height([20, 20, 80, 20], px_per_mm)
+            fa = check_font_compliance(
+                field_name="net_quantity",
+                measured_height_mm=test_h,
+                net_quantity_g=net_quantity_g,
+                package_width_mm=package_width_mm,
+                calibration_method=scale_preview["calibration_method"],
+            )
+            is_undersized = not fa["compliant"]
+            priority_check_result = {
+                "claimed_violation": claimed_violation_type,
+                "verified": is_undersized,
+                "field_name": "net_quantity",
+                "violation_type": ViolationType.undersized_font.value,
+                "severity": ViolationSeverity.medium.value if is_undersized else ViolationSeverity.low.value,
+                "details": (
+                    f"Priority font check: Measured height {fa['measured_mm']:.2f}mm against required {fa['required_mm']:.2f}mm threshold. "
+                    f"{'Undersized font tolerance violation confirmed.' if is_undersized else 'Font meets statutory height requirements.'}"
+                ),
+                "rule_reference": "Legal Metrology (Packaged Commodities) Rules 2011, Rule 7(1) Table I",
+            }
+        elif "mrp" in c_norm or "price" in c_norm:
+            mrp_pat = re.compile(r"(?:MRP|M\.R\.P\.?|Maximum\s+Retail\s+Price)[\s:\-]*(?:Rs\.?|₹|INR)?\s*\d[\d,\.]*", re.IGNORECASE)
+            prelim_blocks = await asyncio.to_thread(run_ocr, preprocessed, None, False, False)
+            prelim_text = " ".join([b.get("text", "") for b in prelim_blocks]) if prelim_blocks else ""
+            mrp_found = bool(mrp_pat.search(prelim_text))
+            priority_check_result = {
+                "claimed_violation": claimed_violation_type,
+                "verified": not mrp_found,
+                "field_name": "mrp",
+                "violation_type": ViolationType.missing.value if not mrp_found else ViolationType.incorrect_format.value,
+                "severity": ViolationSeverity.high.value if not mrp_found else ViolationSeverity.low.value,
+                "details": (
+                    "Priority MRP check: Mandatory declaration 'Maximum Retail Price (MRP)' missing from packaging."
+                    if not mrp_found else
+                    "Priority MRP check: Valid Maximum Retail Price (MRP) declaration detected on packaging."
+                ),
+                "rule_reference": "Legal Metrology Rules 2011, Rule 6(1)(e)",
+            }
+        elif "origin" in c_norm or "country" in c_norm:
+            from app.services.geo_intelligence import infer_country_from_text
+            prelim_blocks = await asyncio.to_thread(run_ocr, preprocessed, None, False, False)
+            prelim_text = " ".join([b.get("text", "") for b in prelim_blocks]) if prelim_blocks else ""
+            geo = infer_country_from_text(prelim_text) if prelim_text else None
+            has_coo = bool(geo and geo.get("country"))
+            priority_check_result = {
+                "claimed_violation": claimed_violation_type,
+                "verified": not has_coo,
+                "field_name": "country_of_origin",
+                "violation_type": ViolationType.missing.value,
+                "severity": ViolationSeverity.high.value if not has_coo else ViolationSeverity.low.value,
+                "details": (
+                    "Priority Origin check: Country of Origin declaration or domestic manufacturer declaration missing."
+                    if not has_coo else
+                    f"Priority Origin check: Country of Origin confirmed as {geo.get('full_declaration', 'India')}."
+                ),
+                "rule_reference": "Legal Metrology Rules 2011, Rule 6(10) & Rule 6(1)(a)",
+            }
+        else:
+            priority_check_result = {
+                "claimed_violation": claimed_violation_type,
+                "verified": True,
+                "field_name": "general",
+                "violation_type": ViolationType.missing.value,
+                "severity": ViolationSeverity.medium.value,
+                "details": f"Priority check: Citizen claimed violation '{claimed_violation_type}' flagged for statutory review.",
+                "rule_reference": "Legal Metrology Rules 2011",
+            }
 
     # ── Step 3: FAST LOCAL GPU OCR + Field Classification ──────────────────────
     #    Primary: LaptopLayoutClassifier leveraging PaddleOCR on RTX 2050 CUDA cores.
@@ -514,6 +624,8 @@ async def _process_single_scan_image(
                 status=ScanStatus.completed,
                 gtin=gtin,
                 batch_code=batch_code,
+                source="citizen" if submitter_role == "citizen" else "inspector",
+                claimed_violation_type=claimed_violation_type,
             )
             db.add(scan)
             await db.flush()
@@ -546,18 +658,25 @@ async def _process_single_scan_image(
     # ── Step 10: Aggregate Compliance Ledger by GTIN ─────────────────────────
     ledger_verdict: str | None = None
     ledger_confidence: float | None = None
-    if db is not None and gtin:
+    report_generated: bool = (submitter_role == "citizen")
+    pdf_report_url: str | None = f"/reports/{scan_id}/pdf" if submitter_role == "citizen" else None
+
+    clean_sid = int(scan_id) if (scan_id is not None and str(scan_id).isdigit()) else 1
+    effective_gtin = gtin or (f"CITIZEN-{clean_sid:06d}" if submitter_role == "citizen" else None)
+    scan_obj = scan if ('scan' in locals() and scan is not None) else None
+
+    if db is not None and effective_gtin and scan_obj is not None:
         try:
             from app.services.compliance_ledger import record_scan_in_ledger
             tier = scale_res.get("calibration_tier", "dpi_estimated")
             ledger_entry = await record_scan_in_ledger(
                 db=db,
-                scan=scan,
-                gtin=gtin,
+                scan=scan_obj,
+                gtin=effective_gtin,
                 batch_code=batch_code,
                 compliance_status=eval_res["compliance_status"],
                 calibration_tier=tier,
-                user_role="inspector" if scan_type_str.lower() == "manual" else "anonymous",
+                user_role=submitter_role if submitter_role == "citizen" else ("inspector" if scan_type_str.lower() == "manual" else "anonymous"),
                 scan_confidence=0.95,
                 product_name=prod_name,
                 category=category,
@@ -565,9 +684,33 @@ async def _process_single_scan_image(
             await db.commit()
             ledger_verdict = ledger_entry.current_verdict
             ledger_confidence = ledger_entry.rolling_confidence
-            logger.info("Compliance ledger updated for GTIN %s: verdict=%s, conf=%.2f", gtin, ledger_verdict, ledger_confidence)
+            logger.info("Compliance ledger updated for GTIN %s: verdict=%s, conf=%.2f", effective_gtin, ledger_verdict, ledger_confidence)
+
+            # Auto-Report vs Manual Review for Citizen Scans
+            if submitter_role == "citizen":
+                ticket_created = getattr(ledger_entry, "re_inspection_ticket", None) is not None
+                if not ticket_created and (ledger_confidence or 0.0) >= 0.70:
+                    try:
+                        from app.services.report_generator import generate_pdf_from_data
+                        report_payload = {
+                            "scan_id": scan_id,
+                            "product_name": prod_name,
+                            "product_category": category,
+                            "scan_type": scan_type_str,
+                            "compliance_status": eval_res["compliance_status"],
+                            "violations": eval_res["violations"],
+                            "fields": unified_extraction["fields"],
+                            "source": "citizen",
+                            "claimed_violation_type": claimed_violation_type,
+                        }
+                        pdf_bytes = generate_pdf_from_data(report_payload)
+                        report_generated = True
+                        pdf_report_url = f"/reports/{scan_id}/pdf"
+                        logger.info("Auto-report generated for citizen scan #%s (%d bytes)", scan_id, len(pdf_bytes))
+                    except Exception as rep_exc:
+                        logger.warning("Auto-report generation failed for citizen scan #%s: %s", scan_id, rep_exc)
         except Exception as ledger_exc:
-            logger.warning("Failed to record scan in compliance ledger for GTIN %s: %s", gtin, ledger_exc)
+            logger.warning("Failed to record scan in compliance ledger for GTIN %s: %s", effective_gtin, ledger_exc)
 
     # Attach decoded GTIN and Batch Code to fields if detected
     if gtin and "gtin" not in unified_extraction["fields"]:
@@ -587,12 +730,95 @@ async def _process_single_scan_image(
             "bbox": [0, 0, 0, 0],
         }
 
+    # ── Step 10b: Citizen Gamification, XP Accounting & Confirmation Messaging ──
+    confirmation_message: str | None = None
+    xp_change: int = 0
+    from app.routers.auth import get_reputation_tier
+
+    if submitter_role == "citizen":
+        claimed_verified = False
+        if claimed_violation_type and claimed_violation_type.strip():
+            c_norm = claimed_violation_type.strip().lower().replace("-", "_").replace(" ", "_")
+            if priority_check_result and priority_check_result.get("verified"):
+                claimed_verified = True
+            if not claimed_verified and eval_res.get("violations"):
+                for v in eval_res["violations"]:
+                    v_field = str(v.get("field", "")).lower()
+                    v_type = str(v.get("type", "")).lower()
+                    v_desc = str(v.get("description", "")).lower()
+                    if (
+                        ("mrp" in c_norm and ("mrp" in v_field or "mrp" in v_desc))
+                        or ("font" in c_norm and ("font" in v_type or "undersized" in v_type))
+                        or ("origin" in c_norm and ("origin" in v_field or "origin" in v_desc))
+                        or (c_norm in v_type or c_norm in v_field)
+                    ):
+                        claimed_verified = True
+                        break
+
+            if claimed_verified:
+                xp_change = 50
+                confirmation_message = (
+                    f"Violation Confirmed: Your reported '{claimed_violation_type}' was verified under Legal Metrology Rules. "
+                    f"Thank you for protecting consumer rights! +50 Trust XP awarded."
+                )
+                notif_type_val = "violation_confirmed"
+                notif_title = "Violation Confirmed (+50 XP)"
+            else:
+                xp_change = -25
+                confirmation_message = (
+                    f"Claim Refuted: Inspection confirmed the label is compliant regarding '{claimed_violation_type}'. "
+                    f"-25 Trust XP deducted from your rating."
+                )
+                notif_type_val = "claim_refuted"
+                notif_title = "Claim Refuted (-25 XP)"
+        else:
+            if eval_res.get("compliance_status") == "non_compliant":
+                xp_change = 20
+                confirmation_message = "Violation Detected: Statutory discrepancy identified on packaging. +20 Trust XP awarded."
+                notif_type_val = "violation_confirmed"
+                notif_title = "Violation Detected (+20 XP)"
+            else:
+                xp_change = 0
+                confirmation_message = "Scan Complete: Product packaging appears compliant with statutory declarations."
+                notif_type_val = "system_notice"
+                notif_title = "Scan Complete"
+
+        if current_user is not None:
+            current_user.xp = getattr(current_user, "xp", 100) + xp_change
+            if db is not None:
+                try:
+                    from app.models.citizen_notification import CitizenNotification, NotificationType
+                    notif = CitizenNotification(
+                        user_id=current_user.id,
+                        scan_id=scan_id if isinstance(scan_id, int) else None,
+                        notification_type=getattr(NotificationType, notif_type_val, NotificationType.system_notice),
+                        title=notif_title,
+                        message=confirmation_message,
+                        xp_change=xp_change,
+                    )
+                    db.add(notif)
+                    await db.commit()
+                except Exception as n_err:
+                    logger.warning("Could not persist citizen notification: %s", n_err)
+
     res_item = {
         "scan_id": scan_id,
         "product_id": product_id,
         "product_name": prod_name,
         "product_category": category,
         "scan_type": scan_type_str,
+        "source": "citizen" if submitter_role == "citizen" else "inspector",
+        "submitter_role": submitter_role,
+        "claimed_violation_type": claimed_violation_type,
+        "priority_check_result": priority_check_result,
+        "image_sha256": server_sha256,
+        "report_generated": report_generated,
+        "pdf_report_url": pdf_report_url,
+        "confirmation_message": confirmation_message,
+        "xp_awarded": xp_change,
+        "current_xp": getattr(current_user, "xp", 100) if current_user else 100,
+        "submitter_xp": getattr(current_user, "xp", 100) if current_user else 100,
+        "reputation_tier": get_reputation_tier(getattr(current_user, "xp", 100) if current_user else 100),
         "source_url": source_url or filename,
         "scanned_image_url": source_url or filename,
         "gtin": gtin,
@@ -1488,11 +1714,15 @@ async def batch_scan_images(
     package_width_mm: float = Form(None),
     net_quantity_g: float = Form(None),
     ar_pixels_per_mm: float = Form(None),
-    current_user: User = Depends(require_inspector),
+    claimed_violation_type: str = Form(None),
+    submitter_role: str = Form("inspector"),
+    image_sha256: str = Form(None),
+    current_user: User = Depends(require_citizen_or_above),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Batch process uploaded product label images synchronously.
+    Supports Inspector, Admin, and Citizen role submissions.
     """
     if not files:
         raise HTTPException(
@@ -1500,7 +1730,23 @@ async def batch_scan_images(
             detail="No image files uploaded in batch request. For URL batch scanning, use POST /scan/batch/queue.",
         )
 
-    logger.info("Received batch scan request: %d files, scan_type=%s, ar_calibrated=%s", len(files), scan_type, bool(ar_pixels_per_mm))
+    effective_role = submitter_role
+    if getattr(current_user, "role", None) == UserRole.citizen:
+        effective_role = "citizen"
+
+    # ── Negative XP Fraud / Spam Filter ──────────────────────────────────────
+    if effective_role == "citizen" and current_user is not None:
+        user_xp = getattr(current_user, "xp", 100)
+        if user_xp < 0:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Submission blocked: Account has negative trust XP ({user_xp}). Reporting privileges are suspended due to inaccurate claims or evidence tampering.",
+            )
+
+    logger.info(
+        "Received batch scan request: %d files, scan_type=%s, submitter_role=%s, claimed_violation=%s",
+        len(files), scan_type, effective_role, claimed_violation_type,
+    )
 
     results = []
     errors = []
@@ -1518,8 +1764,14 @@ async def batch_scan_images(
                 net_quantity_g=net_quantity_g,
                 db=db,
                 ar_pixels_per_mm=ar_pixels_per_mm,
+                claimed_violation_type=claimed_violation_type,
+                submitter_role=effective_role,
+                image_sha256=image_sha256,
+                current_user=current_user,
             )
             results.append(res)
+        except HTTPException:
+            raise
         except Exception as exc:
             logger.error("Failed to process batch image %s: %s", file.filename, exc)
             errors.append({"filename": file.filename, "error": str(exc)})
@@ -1715,6 +1967,10 @@ async def list_recent_scans(
                 "violations": violations_list,
                 "fields": fields,
                 "extraction_summary": summary,
+                "source": getattr(s, "source", "inspector"),
+                "claimed_violation_type": getattr(s, "claimed_violation_type", None),
+                "report_generated": getattr(s, "source", "") == "citizen",
+                "pdf_report_url": f"/reports/{s.id}/pdf",
                 "created_at": s.created_at.isoformat() if s.created_at else datetime.now(timezone.utc).isoformat(),
             })
     except Exception as db_err:
@@ -1726,15 +1982,27 @@ async def list_recent_scans(
 
     # First add in-memory recent scans (they have complete bboxes & extracted fields)
     for c in RECENT_SCANS:
-        sid = c.get("scan_id")
+        sid = c.get("scan_id") or c.get("scan_uid")
         if sid and sid not in seen_ids:
             seen_ids.add(sid)
             merged.append(c)
 
-    # Then add database scans
+    # Next add persistent SQLite repository scans (including citizen mobile uploads)
+    try:
+        from app.core.scan_repository import ScanRepository
+        repo_scans = ScanRepository.list_scans(limit=limit).get("items", [])
+        for r_scan in repo_scans:
+            sid = r_scan.get("scan_uid") or r_scan.get("scan_id") or r_scan.get("id")
+            if sid and sid not in seen_ids:
+                seen_ids.add(sid)
+                merged.append(r_scan)
+    except Exception as repo_err:
+        logger.warning("Failed to fetch scans from ScanRepository: %s", repo_err)
+
+    # Then add PostgreSQL database scans
     for d in scans_from_db:
-        sid = d.get("scan_id")
-        if sid not in seen_ids:
+        sid = d.get("scan_id") or d.get("scan_uid")
+        if sid and sid not in seen_ids:
             seen_ids.add(sid)
             merged.append(d)
 

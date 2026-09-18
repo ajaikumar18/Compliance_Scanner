@@ -21,9 +21,10 @@ import type { ReInspectionTicket, TicketSummaryStats } from '../types';
 interface ReInspectionQueueProps {
   onSelectScan?: (scanId: number) => void;
   onViewGtinTrust?: (gtin: string) => void;
+  sourceFilter?: string;
 }
 
-export const ReInspectionQueue = ({ onSelectScan }: ReInspectionQueueProps) => {
+export const ReInspectionQueue = ({ onSelectScan, sourceFilter }: ReInspectionQueueProps) => {
   const [tickets, setTickets] = useState<ReInspectionTicket[]>([]);
   const [stats, setStats] = useState<TicketSummaryStats | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -95,6 +96,9 @@ export const ReInspectionQueue = ({ onSelectScan }: ReInspectionQueueProps) => {
       return false;
     }
     if (priorityFilter !== 'all' && t.priority !== priorityFilter) {
+      return false;
+    }
+    if (sourceFilter && (t.source || 'inspector').toLowerCase() !== sourceFilter.toLowerCase()) {
       return false;
     }
     if (searchGtin.trim()) {
@@ -277,6 +281,13 @@ export const ReInspectionQueue = ({ onSelectScan }: ReInspectionQueueProps) => {
                     <span className="font-mono text-xs text-[#1C2B3A] bg-[#FAF8F5] px-2 py-0.5 border border-[#D8D2C6]">
                       {ticket.ticket_number}
                     </span>
+
+                    {/* Citizen Source Badge */}
+                    {ticket.source === 'citizen' && (
+                      <span className="px-2 py-0.5 text-[10px] font-mono uppercase font-bold bg-[#EAF4EE] text-[#2F6F4E] border border-[#9BC6AE]">
+                        Citizen Evidence {ticket.claimed_violation_type ? `• ${ticket.claimed_violation_type}` : ''}
+                      </span>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-1.5 text-xs text-[#5E6E80] font-mono">

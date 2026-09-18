@@ -12,6 +12,7 @@ from app.models.user import UserRole
 class UserBase(BaseModel):
     username: str = Field(..., min_length=3, max_length=150, examples=["inspector_01"])
     role: UserRole = UserRole.viewer
+    xp: int = Field(default=100, description="Reputation and Gamification Trust XP")
 
 
 class UserCreate(UserBase):

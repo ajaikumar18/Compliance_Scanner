@@ -223,3 +223,4 @@ class RoleChecker:
 require_admin = RoleChecker(["admin"])
 require_inspector = RoleChecker(["inspector", "admin"])
 require_viewer = RoleChecker(["viewer", "inspector", "admin"])
+require_citizen_or_above = RoleChecker(["citizen", "inspector", "admin"])

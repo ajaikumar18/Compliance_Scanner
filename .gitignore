@@ -40,3 +40,5 @@ Thumbs.db
 .tts_cache/
 *.mp3
 
+# Build artifacts / APKs
+*.apk

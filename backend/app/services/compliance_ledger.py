@@ -42,6 +42,7 @@ USER_ROLE_WEIGHTS: dict[str, float] = {
     "inspector": 1.6,          # Official regulatory inspector audit
     "admin": 1.6,              # System / Lead compliance administrator
     "viewer": 0.9,             # Authenticated read/viewer scan
+    "citizen": 1.0,            # Verified citizen evidence submission
     "anonymous": 0.8,          # Public unauthenticated submission
 }
 

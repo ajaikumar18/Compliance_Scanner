@@ -5,6 +5,17 @@ from app.models.violation import Violation
 from app.models.inspection_history import InspectionHistory
 from app.models.compliance_ledger import ComplianceLedger
 from app.models.re_inspection_ticket import ReInspectionTicket
+from app.models.citizen_notification import CitizenNotification, NotificationType
 
-__all__ = ["User", "Product", "Scan", "Violation", "InspectionHistory", "ComplianceLedger", "ReInspectionTicket"]
+__all__ = [
+    "User",
+    "Product",
+    "Scan",
+    "Violation",
+    "InspectionHistory",
+    "ComplianceLedger",
+    "ReInspectionTicket",
+    "CitizenNotification",
+    "NotificationType",
+]
 

@@ -64,6 +64,8 @@ def _serialize_ticket(ticket: Any) -> dict[str, Any]:
         "created_at": ticket.created_at,
         "updated_at": ticket.updated_at,
         "trigger_scan_violations": violations,
+        "source": getattr(ticket.trigger_scan, "source", getattr(ticket, "source", "inspector")) if ticket.trigger_scan else getattr(ticket, "source", "inspector"),
+        "claimed_violation_type": getattr(ticket.trigger_scan, "claimed_violation_type", getattr(ticket, "claimed_violation_type", None)) if ticket.trigger_scan else getattr(ticket, "claimed_violation_type", None),
     }
 
 
