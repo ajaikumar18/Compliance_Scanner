@@ -5,6 +5,13 @@ import 'package:http/http.dart' as http;
 import '../models/scan_result.dart';
 import '../models/user.dart';
 
+/// Default scan upload timeout. AI processing with PaddleOCR can take
+/// up to 60 seconds on first request (cold GPU warm-up). 90s gives headroom.
+const Duration _kUploadTimeout = Duration(seconds: 90);
+
+/// Short timeout for health checks and auth requests.
+const Duration _kShortTimeout = Duration(seconds: 8);
+
 class ApiService {
   static String get defaultBaseUrl {
     if (kIsWeb) {
@@ -25,6 +32,19 @@ class ApiService {
     baseUrl = url;
   }
 
+  // ── Connectivity Check ─────────────────────────────────────────────────────
+  /// Returns true if the backend health endpoint responds within 5 seconds.
+  static Future<bool> ping() async {
+    try {
+      final response = await http
+          .get(Uri.parse('$baseUrl/health'))
+          .timeout(const Duration(seconds: 5));
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
   // ── Authentication ──────────────────────────────────────────────────────────
   static Future<User> login(String username, String password) async {
     try {
@@ -32,7 +52,7 @@ class ApiService {
         Uri.parse('$baseUrl/auth/login'),
         headers: {'Content-Type': 'application/x-www-form-urlencoded'},
         body: {'username': username, 'password': password},
-      ).timeout(const Duration(seconds: 8));
+      ).timeout(_kShortTimeout);
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -81,7 +101,7 @@ class ApiService {
       request.fields['net_quantity_g'] = netQuantityG.toString();
     }
 
-    final streamedResp = await request.send();
+    final streamedResp = await request.send().timeout(_kUploadTimeout);
     final response = await http.Response.fromStream(streamedResp);
 
     if (response.statusCode == 200) {
@@ -115,7 +135,7 @@ class ApiService {
     request.fields['scan_type'] = 'batch';
     request.fields['category'] = category;
 
-    final streamedResp = await request.send();
+    final streamedResp = await request.send().timeout(_kUploadTimeout);
     final response = await http.Response.fromStream(streamedResp);
 
     if (response.statusCode == 200) {

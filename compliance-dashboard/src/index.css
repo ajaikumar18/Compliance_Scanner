@@ -28,6 +28,8 @@
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    scroll-behavior: smooth;
     min-height: 100vh;
   }
 
@@ -39,6 +41,27 @@
   .font-mono-audit {
     font-family: 'IBM Plex Mono', monospace;
   }
+}
+
+/* ── Loading skeleton animation ──────────────────────────────────────────── */
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+.animate-skeleton {
+  animation: skeleton-pulse 1.6s ease-in-out infinite;
+  background-color: #E8E4DC;
+  border-radius: 2px;
+}
+
+.animate-fade-in {
+  animation: fade-in 0.25s ease-out both;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 /* ── Audit & Evidence UI Utility Classes (No Glassmorphism, No Drop Shadows) ─ */

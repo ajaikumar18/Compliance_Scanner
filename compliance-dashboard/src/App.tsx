@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Loader2, CheckCircle2, AlertTriangle, RefreshCw } from 'lucide-react';
 import { Navbar } from './components/Navbar';
 import { LoginPage } from './pages/LoginPage';
@@ -64,7 +64,7 @@ export function App() {
   } | null>(null);
 
   // Initial load: Fetch real scans from backend database
-  const refreshScansFromBackend = async () => {
+  const refreshScansFromBackend = useCallback(async () => {
     setIsRefreshing(true);
     try {
       const backendScans = await fetchScans();
@@ -77,11 +77,17 @@ export function App() {
     } finally {
       setIsRefreshing(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     refreshScansFromBackend();
-  }, []);
+  }, [refreshScansFromBackend]);
+
+  // Auto-refresh every 60 seconds to keep the dashboard live during demos
+  useEffect(() => {
+    const autoRefreshTimer = setInterval(refreshScansFromBackend, 60_000);
+    return () => clearInterval(autoRefreshTimer);
+  }, [refreshScansFromBackend]);
 
   // Poll active batch progress every 1.5s
   useEffect(() => {

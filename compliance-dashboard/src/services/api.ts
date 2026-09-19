@@ -8,6 +8,25 @@ import type {
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
+// ───────────────────────────────────────────────────────────────────────
+// Request timeout helper — aborts fetches that take too long
+// ───────────────────────────────────────────────────────────────────────
+
+function fetchWithTimeout(input: RequestInfo, init: RequestInit = {}, timeoutMs = 30_000): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(input, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+
+/** Quick connectivity check — returns true if the backend /health endpoint responds. */
+export async function pingBackend(): Promise<boolean> {
+  try {
+    const resp = await fetchWithTimeout(`${API_BASE_URL}/health`, {}, 5_000);
+    return resp.ok;
+  } catch {
+    return false;
+  }
+}
 
 async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
@@ -53,19 +72,25 @@ export async function uploadSingleScan(
   if (metadata.netQuantityG) formData.append('net_quantity_g', metadata.netQuantityG.toString());
   if (metadata.arPixelsPerMm) formData.append('ar_pixels_per_mm', metadata.arPixelsPerMm.toString());
 
-  const resp = await fetch(`${API_BASE_URL}/scan/batch`, {
-    method: 'POST',
-    body: formData,
-  });
-  const json = await handleResponse<any>(resp);
-  if (json.results && json.results.length > 0) {
-    return json.results[0];
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 120_000); // 2 min for large images
+  try {
+    const resp = await fetch(`${API_BASE_URL}/scan/batch`, {
+      method: 'POST',
+      body: formData,
+      signal: controller.signal,
+    });
+    const json = await handleResponse<any>(resp);
+    if (json.results && json.results.length > 0) {
+      return json.results[0];
+    }
+    if (json.errors && json.errors.length > 0) {
+      throw new Error(json.errors[0].error || 'Scan processing failed.');
+    }
+    throw new Error('No scan result returned from server');
+  } finally {
+    clearTimeout(timer);
   }
-  if (json.errors && json.errors.length > 0) {
-    throw new Error(json.errors[0].error || 'Scan processing failed.');
-  }
-  throw new Error('No scan result returned from server');
-}
 
 export async function uploadBatchFiles(
   files: File[],
@@ -76,12 +101,19 @@ export async function uploadBatchFiles(
   formData.append('scan_type', 'batch');
   formData.append('category', category);
 
-  const resp = await fetch(`${API_BASE_URL}/scan/batch`, {
-    method: 'POST',
-    body: formData,
-  });
-  const json = await handleResponse<any>(resp);
-  return json.results || [];
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 120_000);
+  try {
+    const resp = await fetch(`${API_BASE_URL}/scan/batch`, {
+      method: 'POST',
+      body: formData,
+      signal: controller.signal,
+    });
+    const json = await handleResponse<any>(resp);
+    return json.results || [];
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export interface EcommerceScanResponse {

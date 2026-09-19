@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   CheckCircle2,
   AlertOctagon,
@@ -27,7 +27,16 @@ export const CitizenQueuePage: React.FC<CitizenQueuePageProps> = ({
   const [allScans, setAllScans] = useState<ScanResult[]>(initialScans || []);
   const [isLoading, setIsLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [reputationFilter, setReputationFilter] = useState<'all' | 'trusted' | 'flagged'>('all');
+
+  // Debounce search: only update the active filter after 300ms of inactivity
+  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleSearchChange = (value: string) => {
+    setSearchTerm(value);
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    debounceTimer.current = setTimeout(() => setDebouncedSearch(value), 300);
+  };
 
   const loadScans = async () => {
     setIsLoading(true);
@@ -51,25 +60,27 @@ export const CitizenQueuePage: React.FC<CitizenQueuePageProps> = ({
     }
   }, [initialScans]);
 
-  // Filter for citizen-submitted scans
-  const citizenAutoApproved = allScans.filter(s => {
-    const isCitizen = (s.source || '').toLowerCase() === 'citizen' || (s as any).submitter_role === 'citizen';
-    if (!isCitizen) return false;
+  // Memoize filtered list — only recalculate when scans, filter, or debounced search changes
+  const citizenAutoApproved = useMemo(() => {
+    return allScans.filter(s => {
+      const isCitizen = (s.source || '').toLowerCase() === 'citizen' || (s as any).submitter_role === 'citizen';
+      if (!isCitizen) return false;
 
-    // Reputation Filter
-    const userXp = s.submitter_xp ?? (s as any).current_xp ?? 100;
-    if (reputationFilter === 'trusted' && userXp < 100) return false;
-    if (reputationFilter === 'flagged' && userXp >= 0) return false;
+      // Reputation Filter
+      const userXp = s.submitter_xp ?? (s as any).current_xp ?? 100;
+      if (reputationFilter === 'trusted' && userXp < 100) return false;
+      if (reputationFilter === 'flagged' && userXp >= 0) return false;
 
-    if (searchTerm.trim()) {
-      const q = searchTerm.toLowerCase();
-      const matchName = (s.product_name || '').toLowerCase().includes(q);
-      const matchCat = (s.product_category || '').toLowerCase().includes(q);
-      const matchGtin = (s.gtin || '').toLowerCase().includes(q);
-      if (!matchName && !matchCat && !matchGtin) return false;
-    }
-    return true;
-  });
+      if (debouncedSearch.trim()) {
+        const q = debouncedSearch.toLowerCase();
+        const matchName = (s.product_name || '').toLowerCase().includes(q);
+        const matchCat = (s.product_category || '').toLowerCase().includes(q);
+        const matchGtin = ((s as any).gtin || '').toLowerCase().includes(q);
+        if (!matchName && !matchCat && !matchGtin) return false;
+      }
+      return true;
+    });
+  }, [allScans, reputationFilter, debouncedSearch]);
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-6">
@@ -146,7 +157,7 @@ export const CitizenQueuePage: React.FC<CitizenQueuePageProps> = ({
                 type="text"
                 placeholder="Search citizen specimen, brand, or GTIN..."
                 value={searchTerm}
-                onChange={e => setSearchTerm(e.target.value)}
+                onChange={e => handleSearchChange(e.target.value)}
                 className="w-full pl-9 pr-3 py-1.5 text-xs border border-[#C4BCAC] bg-[#FAF8F5] text-[#1C2B3A] rounded-none focus:outline-none focus:border-[#1C2B3A]"
               />
             </div>

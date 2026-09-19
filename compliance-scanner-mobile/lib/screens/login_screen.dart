@@ -17,6 +17,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _passwordController = TextEditingController(text: 'password123');
   bool _isLoading = false;
   String? _error;
+  bool? _isServerReachable;
 
   void _handleLogin() async {
     setState(() {
@@ -34,9 +35,29 @@ class _LoginScreenState extends State<LoginScreen> {
       setState(() {
         _error = 'Login failed. Please check backend connection.';
       });
+      // Auto-dismiss error after 4 seconds
+      Future.delayed(const Duration(seconds: 4), () {
+        if (mounted) setState(() => _error = null);
+      });
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // Check server connectivity on open
+    ApiService.ping().then((reachable) {
+      if (mounted) setState(() => _isServerReachable = reachable);
+    });
+  }
+
+  @override
+  void dispose() {
+    _usernameController.dispose();
+    _passwordController.dispose();
+    super.dispose();
   }
 
   void _handleDemoLogin(String role) async {
@@ -122,6 +143,47 @@ class _LoginScreenState extends State<LoginScreen> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         actions: [
+          // Connection status indicator
+          Padding(
+            padding: const EdgeInsets.only(right: 4),
+            child: Center(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 400),
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: _isServerReachable == null
+                          ? Colors.grey
+                          : _isServerReachable!
+                              ? AppColors.emeraldAccent
+                              : Colors.redAccent,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    _isServerReachable == null
+                        ? 'Checking...'
+                        : _isServerReachable!
+                            ? 'Online'
+                            : 'Offline',
+                    style: TextStyle(
+                      color: _isServerReachable == null
+                          ? Colors.grey
+                          : _isServerReachable!
+                              ? AppColors.emeraldAccent
+                              : Colors.redAccent,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.settings_ethernet, color: AppColors.emeraldAccent),
             tooltip: 'Server Connection Config',

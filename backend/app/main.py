@@ -2,11 +2,14 @@
 FastAPI application entry point.
 """
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
 from app.core.config import settings
 from app.core.database import engine
@@ -35,7 +38,6 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.error("❌  Database connection failed: %s", exc)
 
-    import asyncio
 
     # ── Pre-warm PaddleOCR GPU engine in background ───────────────────────────
     # Loads CUDA models into VRAM at startup so the FIRST scan request
@@ -80,6 +82,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# ── GZip ──────────────────────────────────────────────────────────────────────
+# Compress responses larger than 1 KB — scan payloads with base64 QR images
+# can be 20-100 KB; GZip reduces transfer size by ~70%.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
+
 # ── CORS ──────────────────────────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
@@ -101,6 +108,12 @@ app.include_router(tickets.router)
 
 
 # ── Root redirect ─────────────────────────────────────────────────────────────
+_startup_time: str = datetime.now(timezone.utc).isoformat()
+
 @app.get("/", include_in_schema=False)
 async def root():
-    return {"message": f"Welcome to {settings.APP_NAME}. Visit /docs for the API reference."}
+    return {
+        "message": f"Welcome to {settings.APP_NAME}. Visit /docs for the API reference.",
+        "version": settings.APP_VERSION,
+        "startup_time": _startup_time,
+    }

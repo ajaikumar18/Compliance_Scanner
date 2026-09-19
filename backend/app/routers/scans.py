@@ -38,17 +38,23 @@ from app.models.product import Product
 from app.models.scan import Scan, ScanStatus, ScanType
 from app.models.user import User, UserRole
 from app.models.violation import Violation, ViolationSeverity, ViolationType
+from app.services.audience_suitability import evaluate_audience_suitability
 from app.services.barcode_extractor import decode_barcodes, extract_batch_code
+from app.services.consumption_predictor import predict_consumption
+from app.services.damage_detector import analyze_package_damage
 from app.services.ecommerce_extractor import (
     extract_product_gallery_images,
     extract_product_specs,
     parse_search_card_links,
 )
+from app.services.expiry_intelligence import analyze_expiry
 from app.services.field_classifier import LaptopLayoutClassifier, classify_fields
 from app.services.font_size_analyzer import calibrate_scale, check_font_compliance, measure_text_height
 from app.services.genai_extraction import extract_via_openrouter_sync, merge_ocr_and_genai_results
-from app.services.image_preprocessing import preprocess_pipeline
+from app.services.image_preprocessing import generate_preprocessing_variants, preprocess_pipeline
+from app.services.nutrition_analyzer import extract_nutrition_data
 from app.services.ocr_engine import run_ocr
+from app.services.qr_service import create_digital_product_profile
 from app.services.rule_engine import evaluate_compliance
 from app.tasks.scan_tasks import process_scan_batch
 
@@ -57,6 +63,17 @@ logger = logging.getLogger(__name__)
 # In-memory registry for local background batch tasks (used when Celery/Redis is offline or for local dev)
 ACTIVE_BATCH_JOBS: dict[str, dict[str, Any]] = {}
 RECENT_SCANS: list[dict[str, Any]] = []
+
+# Cap to prevent unbounded memory growth during long sessions
+RECENT_SCANS_MAX_SIZE = 200
+
+
+def _append_recent_scan(scan: dict[str, Any]) -> None:
+    """Append a scan to the in-memory cache, evicting oldest entries beyond the cap."""
+    RECENT_SCANS.append(scan)
+    if len(RECENT_SCANS) > RECENT_SCANS_MAX_SIZE:
+        del RECENT_SCANS[: len(RECENT_SCANS) - RECENT_SCANS_MAX_SIZE]
+
 
 router = APIRouter(tags=["Scans"])
 
@@ -843,9 +860,7 @@ async def _process_single_scan_image(
     except Exception as intel_err:
         logger.warning("Product intelligence enrichment failed (non-critical): %s", intel_err)
 
-    RECENT_SCANS.insert(0, res_item)
-    if len(RECENT_SCANS) > 200:
-        RECENT_SCANS.pop()
+    _append_recent_scan(res_item)
     return res_item
 
 

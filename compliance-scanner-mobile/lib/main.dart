@@ -3,7 +3,12 @@ import 'models/user.dart';
 import 'screens/login_screen.dart';
 import 'screens/capture_screen.dart';
 
+/// Global navigator key — allows navigation from outside of widget trees
+/// (e.g. from API service error handlers) without needing a BuildContext.
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const ComplianceScannerApp());
 }
 
@@ -28,6 +33,7 @@ class _ComplianceScannerAppState extends State<ComplianceScannerApp> {
     return MaterialApp(
       title: 'InnoveXguard AI Mobile',
       debugShowCheckedModeBanner: false,
+      navigatorKey: navigatorKey,
       theme: ThemeData(
         brightness: Brightness.dark,
         scaffoldBackgroundColor: const Color(0xFF0F172A),

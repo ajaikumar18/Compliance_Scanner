@@ -23,6 +23,13 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Module-level singletons (created once, reused across all calls)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# CLAHE is stateless after construction; creating it once saves ~1ms per image.
+_CLAHE = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Internal helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -278,15 +285,17 @@ def enhance_contrast(image: np.ndarray) -> np.ndarray:
     np.ndarray
         Contrast-enhanced BGR image.
     """
+    if image is None or image.size == 0:
+        return image
+
     if image.ndim == 2:
         image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
 
     lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
     l_channel, a_channel, b_channel = cv2.split(lab)
 
-    # CLAHE on L channel
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    l_clahe = clahe.apply(l_channel)
+    # CLAHE on L channel — use module-level singleton (no re-allocation per call)
+    l_clahe = _CLAHE.apply(l_channel)
 
     # Highlight suppression
     glare_threshold = 230

@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import '../models/user.dart';
 import '../models/scan_result.dart';
@@ -61,7 +62,38 @@ class _CaptureScreenState extends State<CaptureScreen> {
     }
   }
 
+  /// Reusable restricted-submission dialog (replaces two identical inline dialogs)
+  void _showTamperDialog(String message) {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.slate800,
+        title: const Row(
+          children: [
+            Icon(Icons.gavel, color: Colors.redAccent),
+            SizedBox(width: 8),
+            Text('Submission Restricted', style: TextStyle(color: Colors.white, fontSize: 16)),
+          ],
+        ),
+        content: Text(
+          message,
+          style: const TextStyle(color: Colors.white70, fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Understood', style: TextStyle(color: AppColors.emeraldAccent)),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _capturePhoto(ImageSource source) async {
+    // Subtle tactile feedback on capture tap
+    await HapticFeedback.lightImpact();
+
     final XFile? photo = await _picker.pickImage(
       source: source,
       imageQuality: 90,
@@ -197,35 +229,11 @@ class _CaptureScreenState extends State<CaptureScreen> {
       } catch (e) {
         final errStr = e.toString();
         if (errStr.contains('negative trust XP') || errStr.contains('tamper') || errStr.contains('blocked')) {
-          if (mounted) {
-            showDialog(
-              context: context,
-              builder: (ctx) => AlertDialog(
-                backgroundColor: AppColors.slate800,
-                title: const Row(
-                  children: [
-                    Icon(Icons.gavel, color: Colors.redAccent),
-                    SizedBox(width: 8),
-                    Text('Submission Restricted', style: TextStyle(color: Colors.white, fontSize: 16)),
-                  ],
-                ),
-                content: Text(
-                  errStr.replaceAll('Exception:', '').trim(),
-                  style: const TextStyle(color: Colors.white70, fontSize: 13),
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(ctx),
-                    child: const Text('Understood', style: TextStyle(color: AppColors.emeraldAccent)),
-                  ),
-                ],
-              ),
-            );
-          }
+          _showTamperDialog(errStr.replaceAll('Exception:', '').trim());
           return;
         }
         final mockResult = ScanResult(
-          scanId: 101,
+          scanId: '101',
           productName: 'Sample Product Label (Mobile Offline Scan)',
           productCategory: 'Packaged Foods',
           complianceStatus: 'non_compliant',
@@ -689,28 +697,8 @@ class _CaptureScreenState extends State<CaptureScreen> {
                   GestureDetector(
                     onTap: () {
                       if (_selectedRole == 'citizen' && _citizenXp < 0) {
-                        showDialog(
-                          context: context,
-                          builder: (ctx) => AlertDialog(
-                            backgroundColor: AppColors.slate800,
-                            title: const Row(
-                              children: [
-                                Icon(Icons.gavel, color: Colors.redAccent),
-                                SizedBox(width: 8),
-                                Text('Submission Restricted', style: TextStyle(color: Colors.white, fontSize: 16)),
-                              ],
-                            ),
-                            content: Text(
-                              'Your account has a negative trust score ($_citizenXp XP) due to unverified claims or evidence tampering. Reporting privileges are suspended.',
-                              style: const TextStyle(color: Colors.white70, fontSize: 13),
-                            ),
-                            actions: [
-                              TextButton(
-                                onPressed: () => Navigator.pop(ctx),
-                                child: const Text('OK', style: TextStyle(color: AppColors.emeraldAccent)),
-                              ),
-                            ],
-                          ),
+                        _showTamperDialog(
+                          'Your account has a negative trust score ($_citizenXp XP) due to unverified claims or evidence tampering. Reporting privileges are suspended.',
                         );
                         return;
                       }
