@@ -91,6 +91,7 @@ export async function uploadSingleScan(
   } finally {
     clearTimeout(timer);
   }
+}
 
 export async function uploadBatchFiles(
   files: File[],
