@@ -21,9 +21,17 @@ class CaptureScreen extends StatefulWidget {
   State<CaptureScreen> createState() => _CaptureScreenState();
 }
 
+enum ScanCaptureMode {
+  single,
+  multiSide,
+  aisleBatch,
+}
+
 class _CaptureScreenState extends State<CaptureScreen> {
   final ImagePicker _picker = ImagePicker();
-  bool _isContinuousMode = false;
+  ScanCaptureMode _captureMode = ScanCaptureMode.multiSide;
+  bool get _isContinuousMode => _captureMode == ScanCaptureMode.aisleBatch;
+  bool get _isMultiSideMode => _captureMode == ScanCaptureMode.multiSide;
   bool _isOfflineMode = false;
   bool _isAnalyzing = false;
   int _queuedCount = 0;
@@ -90,6 +98,48 @@ class _CaptureScreenState extends State<CaptureScreen> {
     );
   }
 
+  Widget _buildModeTab(ScanCaptureMode mode, String title, IconData icon) {
+    final isSelected = _captureMode == mode;
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _captureMode = mode;
+          _capturedSessionFiles.clear();
+        });
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+        decoration: BoxDecoration(
+          color: isSelected ? AppColors.indigo600 : AppColors.slate900,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: isSelected ? AppColors.indigoAccent : Colors.white10,
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 13, color: isSelected ? Colors.white : AppColors.slate400),
+            const SizedBox(width: 4),
+            Flexible(
+              child: Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: isSelected ? Colors.white : AppColors.slate400,
+                  fontSize: 10.5,
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _capturePhoto(ImageSource source) async {
     // Subtle tactile feedback on capture tap
     await HapticFeedback.lightImpact();
@@ -105,28 +155,47 @@ class _CaptureScreenState extends State<CaptureScreen> {
     final bytes = await file.readAsBytes();
     final clientHash = sha256.convert(bytes).toString();
 
-    if (_isOfflineMode || _isContinuousMode) {
+    if (_isOfflineMode) {
       await OfflineQueueService.addToQueue(
         file.path,
         category: 'Store Aisle Inspection',
         aisle: 'Aisle ${_capturedSessionFiles.length + 1}',
       );
-
-      setState(() {
-        _capturedSessionFiles.add(file);
-      });
+      setState(() => _capturedSessionFiles.add(file));
       _refreshQueueCount();
-
       if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('💾 Saved to offline queue (Network offline)'),
+            duration: Duration(seconds: 2),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    } else if (_isMultiSideMode) {
+      setState(() => _capturedSessionFiles.add(file));
+      if (mounted) {
+        final count = _capturedSessionFiles.length;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              _isContinuousMode
-                  ? '📸 Photo ${_capturedSessionFiles.length} queued for aisle batch scan!'
-                  : '💾 Saved to offline queue (Network offline)',
+              count == 1
+                  ? '📸 Side 1 captured! Tap Camera for Side 2 (Back/Flap), or tap Analyze.'
+                  : '📸 Side $count captured! Ready to analyze full product.',
             ),
             duration: const Duration(seconds: 2),
-            backgroundColor: _isContinuousMode ? AppColors.indigo600 : Colors.orange,
+            backgroundColor: AppColors.indigo600,
+          ),
+        );
+      }
+    } else if (_isContinuousMode) {
+      setState(() => _capturedSessionFiles.add(file));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('📸 Photo ${_capturedSessionFiles.length} queued for aisle batch scan!'),
+            duration: const Duration(seconds: 2),
+            backgroundColor: AppColors.indigo600,
           ),
         );
       }
@@ -149,75 +218,7 @@ class _CaptureScreenState extends State<CaptureScreen> {
             });
           }
           if (result.confirmationMessage != null) {
-            await showDialog(
-              context: context,
-              barrierDismissible: false,
-              builder: (ctx) => AlertDialog(
-                backgroundColor: AppColors.slate800,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  side: BorderSide(
-                    color: (result.xpAwarded ?? 0) > 0 ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
-                    width: 1.5,
-                  ),
-                ),
-                title: Row(
-                  children: [
-                    Icon(
-                      (result.xpAwarded ?? 0) > 0 ? Icons.verified : Icons.info_outline,
-                      color: (result.xpAwarded ?? 0) > 0 ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        (result.xpAwarded ?? 0) > 0 ? 'Violation Confirmed!' : 'Claim Result',
-                        style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                  ],
-                ),
-                content: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      result.confirmationMessage!,
-                      style: const TextStyle(color: Colors.white, fontSize: 13, height: 1.4),
-                    ),
-                    if (result.xpAwarded != null && result.xpAwarded! > 0) ...[
-                      const SizedBox(height: 12),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF064E3B),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: const Color(0xFF10B981).withOpacity(0.5)),
-                        ),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.star, color: Colors.amber, size: 16),
-                            const SizedBox(width: 6),
-                            Text(
-                              '+${result.xpAwarded} Trust XP Earned',
-                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-                actions: [
-                  ElevatedButton(
-                    onPressed: () => Navigator.pop(ctx),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: (result.xpAwarded ?? 0) > 0 ? const Color(0xFF059669) : AppColors.indigo600,
-                    ),
-                    child: const Text('View Inspection Details', style: TextStyle(color: Colors.white)),
-                  ),
-                ],
-              ),
-            );
+            await _showConfirmationDialog(result);
           }
           if (mounted) {
             Navigator.push(
@@ -257,6 +258,131 @@ class _CaptureScreenState extends State<CaptureScreen> {
       } finally {
         if (mounted) setState(() => _isAnalyzing = false);
       }
+    }
+  }
+
+  Future<void> _showConfirmationDialog(ScanResult result) async {
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.slate800,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(
+            color: (result.xpAwarded ?? 0) > 0 ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
+            width: 1.5,
+          ),
+        ),
+        title: Row(
+          children: [
+            Icon(
+              (result.xpAwarded ?? 0) > 0 ? Icons.verified : Icons.info_outline,
+              color: (result.xpAwarded ?? 0) > 0 ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                (result.xpAwarded ?? 0) > 0 ? 'Violation Confirmed!' : 'Claim Result',
+                style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              result.confirmationMessage!,
+              style: const TextStyle(color: Colors.white, fontSize: 13, height: 1.4),
+            ),
+            if (result.xpAwarded != null && result.xpAwarded! > 0) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF064E3B),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.5)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.star, color: Colors.amber, size: 16),
+                    const SizedBox(width: 6),
+                    Text(
+                      '+${result.xpAwarded} Trust XP Earned',
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: (result.xpAwarded ?? 0) > 0 ? const Color(0xFF059669) : AppColors.indigo600,
+            ),
+            child: const Text('View Inspection Details', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _submitMultiSideProduct() async {
+    if (_capturedSessionFiles.isEmpty) return;
+
+    setState(() => _isAnalyzing = true);
+    try {
+      final result = await ApiService.uploadMultiSideScan(
+        _capturedSessionFiles,
+        submitterRole: _selectedRole == 'citizen' ? 'citizen' : 'inspector',
+        claimedViolationType: _selectedRole == 'citizen' ? _claimedViolationType : null,
+      );
+
+      setState(() {
+        _capturedSessionFiles.clear();
+      });
+
+      if (mounted) {
+        if (result.currentXp != null) {
+          setState(() {
+            _citizenXp = result.currentXp!;
+            if (result.reputationTier != null) {
+              _reputationTier = result.reputationTier!;
+            }
+          });
+        }
+        if (result.confirmationMessage != null) {
+          await _showConfirmationDialog(result);
+        }
+        if (mounted) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => ResultScreen(scanResult: result)),
+          );
+        }
+      }
+    } catch (e) {
+      final errStr = e.toString();
+      if (errStr.contains('negative trust XP') || errStr.contains('tamper') || errStr.contains('blocked')) {
+        _showTamperDialog(errStr.replaceAll('Exception:', '').trim());
+        return;
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Multi-side analysis failed: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isAnalyzing = false);
     }
   }
 
@@ -544,55 +670,65 @@ class _CaptureScreenState extends State<CaptureScreen> {
               ),
 
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              color: _isContinuousMode ? AppColors.indigo600.withOpacity(0.3) : AppColors.slate800,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              color: AppColors.slate800,
+              child: Row(
+                children: [
+                  Expanded(child: _buildModeTab(ScanCaptureMode.single, '1-Side Instant', Icons.camera_alt)),
+                  const SizedBox(width: 6),
+                  Expanded(child: _buildModeTab(ScanCaptureMode.multiSide, 'Multi-Side (2-4)', Icons.flip_camera_android)),
+                  const SizedBox(width: 6),
+                  Expanded(child: _buildModeTab(ScanCaptureMode.aisleBatch, 'Aisle Batch', Icons.view_carousel)),
+                ],
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              color: _isMultiSideMode
+                  ? AppColors.indigo600.withValues(alpha: 0.25)
+                  : (_isContinuousMode ? AppColors.indigo600.withValues(alpha: 0.15) : AppColors.slate900),
               child: Row(
                 children: [
                   Icon(
-                    _isContinuousMode ? Icons.view_carousel : Icons.camera_alt,
-                    color: _isContinuousMode ? AppColors.indigoAccent : AppColors.slate400,
+                    _isMultiSideMode ? Icons.auto_awesome : Icons.info_outline,
+                    size: 14,
+                    color: _isMultiSideMode ? AppColors.emeraldAccent : AppColors.slate400,
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 6),
                   Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          _isContinuousMode ? 'Continuous Store Aisle Mode' : 'Single Label Scan Mode',
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
-                        ),
-                        Text(
-                          _isContinuousMode
-                              ? 'Rapid sequential photo capture for walking through aisles'
-                              : 'Instant single image analysis',
-                          style: const TextStyle(color: AppColors.slate400, fontSize: 11),
-                        ),
-                      ],
+                    child: Text(
+                      _isMultiSideMode
+                          ? (_capturedSessionFiles.isEmpty
+                              ? '📸 Snap Front, Back & Flaps of SAME product. All declarations merged!'
+                              : 'Captured ${_capturedSessionFiles.length} side(s). Snap another side or tap Analyze below.')
+                          : (_isContinuousMode
+                              ? 'Continuous store aisle walk mode: Rapid photos of multiple items.'
+                              : 'Instant single photo scan with immediate analysis.'),
+                      style: TextStyle(
+                        color: _isMultiSideMode ? Colors.white : AppColors.slate400,
+                        fontSize: 11,
+                        fontWeight: _isMultiSideMode ? FontWeight.w500 : FontWeight.normal,
+                      ),
                     ),
                   ),
-                  Switch(
-                    value: _isContinuousMode,
-                    activeColor: AppColors.indigoAccent,
-                    onChanged: (val) {
-                      setState(() {
-                        _isContinuousMode = val;
-                        _capturedSessionFiles.clear();
-                      });
-                    },
-                  )
                 ],
               ),
             ),
 
             Expanded(
               child: _isAnalyzing
-                  ? const Center(
+                  ? Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          CircularProgressIndicator(color: AppColors.indigoAccent),
-                          SizedBox(height: 16),
-                          Text('Analyzing Legal Metrology Declarations...', style: TextStyle(color: Colors.white)),
+                          const CircularProgressIndicator(color: AppColors.indigoAccent),
+                          const SizedBox(height: 16),
+                          Text(
+                            _isMultiSideMode && _capturedSessionFiles.length > 1
+                                ? 'Analyzing ${_capturedSessionFiles.length} sides in parallel...'
+                                : 'Analyzing Legal Metrology Declarations...',
+                            style: const TextStyle(color: Colors.white, fontSize: 13),
+                          ),
                         ],
                       ),
                     )
@@ -606,6 +742,20 @@ class _CaptureScreenState extends State<CaptureScreen> {
                           ),
                           itemCount: _capturedSessionFiles.length,
                           itemBuilder: (ctx, i) {
+                            String sideLabel;
+                            if (_isMultiSideMode) {
+                              if (i == 0) {
+                                sideLabel = 'Side 1 (Front)';
+                              } else if (i == 1) {
+                                sideLabel = 'Side 2 (Back)';
+                              } else if (i == 2) {
+                                sideLabel = 'Side 3 (Flap)';
+                              } else {
+                                sideLabel = 'Side ${i + 1}';
+                              }
+                            } else {
+                              sideLabel = '#${i + 1}';
+                            }
                             return Stack(
                               fit: StackFit.expand,
                               children: [
@@ -619,15 +769,32 @@ class _CaptureScreenState extends State<CaptureScreen> {
                                   child: Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                     decoration: BoxDecoration(
-                                      color: Colors.black.withOpacity(0.7),
+                                      color: Colors.black.withValues(alpha: 0.75),
                                       borderRadius: BorderRadius.circular(6),
                                     ),
                                     child: Text(
-                                      '#${i + 1}',
-                                      style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                                      sideLabel,
+                                      style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
                                     ),
                                   ),
-                                )
+                                ),
+                                Positioned(
+                                  top: 4,
+                                  right: 4,
+                                  child: GestureDetector(
+                                    onTap: () {
+                                      setState(() => _capturedSessionFiles.removeAt(i));
+                                    },
+                                    child: Container(
+                                      padding: const EdgeInsets.all(3),
+                                      decoration: const BoxDecoration(
+                                        color: Colors.black87,
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: const Icon(Icons.close, color: Colors.white, size: 12),
+                                    ),
+                                  ),
+                                ),
                               ],
                             );
                           },
@@ -637,19 +804,51 @@ class _CaptureScreenState extends State<CaptureScreen> {
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               Icon(
-                                Icons.add_a_photo_outlined,
+                                _isMultiSideMode ? Icons.flip_camera_android : Icons.add_a_photo_outlined,
                                 size: 72,
-                                color: AppColors.slate400.withOpacity(0.4),
+                                color: AppColors.slate400.withValues(alpha: 0.4),
                               ),
                               const SizedBox(height: 16),
-                              const Text(
-                                'Tap Camera button to capture product labels',
-                                style: TextStyle(color: AppColors.slate400, fontSize: 14),
+                              Text(
+                                _isMultiSideMode
+                                    ? 'Tap Camera below to capture Side 1 (Front)\nand Side 2 (Back/Flap)'
+                                    : 'Tap Camera button to capture product labels',
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(color: AppColors.slate400, fontSize: 13),
                               ),
                             ],
                           ),
                         ),
             ),
+
+            if (_isMultiSideMode && _capturedSessionFiles.isNotEmpty)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                color: AppColors.slate800,
+                child: Row(
+                  children: [
+                    TextButton.icon(
+                      onPressed: () => setState(() => _capturedSessionFiles.clear()),
+                      icon: const Icon(Icons.delete_outline, size: 16, color: Colors.white60),
+                      label: const Text('Clear', style: TextStyle(color: Colors.white60, fontSize: 12)),
+                    ),
+                    const Spacer(),
+                    ElevatedButton.icon(
+                      onPressed: _isAnalyzing ? null : _submitMultiSideProduct,
+                      icon: const Icon(Icons.bolt, color: Colors.black, size: 18),
+                      label: Text(
+                        'Analyze Product (${_capturedSessionFiles.length} Sides)',
+                        style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 13),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.emeraldAccent,
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                    )
+                  ],
+                ),
+              ),
 
             if (_isContinuousMode && _capturedSessionFiles.isNotEmpty)
               Container(

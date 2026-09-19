@@ -1719,6 +1719,121 @@ async def queue_batch_scan_url_list(
     }
 
 
+def _merge_multi_side_scan_results(side_results: list[dict[str, Any]]) -> dict[str, Any]:
+    """
+    Consolidate extraction and compliance results from multiple angles/sides of the SAME product
+    (e.g. Front face for Brand & Net Qty, Back face for Manufacturer & Ingredients, Flap for MRP & Expiry).
+    
+    Re-evaluates statutory compliance on the unified product profile so declarations found on one side
+    satisfy Legal Metrology requirements without false 'missing declaration' penalties.
+    """
+    if not side_results:
+        return {}
+    if len(side_results) == 1:
+        return side_results[0]
+
+    from app.services.rule_engine import evaluate_compliance
+
+    # 1. Base copy from primary result (first side)
+    primary = dict(side_results[0])
+
+    # 2. Collect & merge fields across all sides
+    merged_fields: dict[str, Any] = {}
+    side_summaries: list[dict[str, Any]] = []
+    all_barcodes: list[dict[str, Any]] = []
+    all_raw_urls: list[str] = []
+
+    best_product_name = None
+    best_gtin = None
+
+    for idx, side in enumerate(side_results):
+        side_num = idx + 1
+        side_name = side.get("source_url") or side.get("filename") or f"Side {side_num}"
+        if side.get("scanned_image_url"):
+            all_raw_urls.append(side["scanned_image_url"])
+        side_fields = side.get("fields") or {}
+
+        # Check for better product name
+        p_name = side.get("product_name")
+        if p_name and p_name not in ("Packaged Commodity", "Sample Product Label", "Product Scan") and not best_product_name:
+            best_product_name = p_name
+
+        # Check for GTIN
+        if not best_gtin and side.get("gtin"):
+            best_gtin = side.get("gtin")
+
+        # Barcodes
+        if side.get("barcodes"):
+            for b in side["barcodes"]:
+                if b not in all_barcodes:
+                    all_barcodes.append(b)
+
+        # Merge fields (preserving highest confidence)
+        for field_name, field_data in side_fields.items():
+            if field_data and (field_data.get("value") is not None or field_data.get("raw_value")):
+                existing = merged_fields.get(field_name)
+                conf = field_data.get("confidence", 0.0) or 0.0
+                if not existing or conf >= (existing.get("confidence", 0.0) or 0.0):
+                    f_copy = dict(field_data)
+                    f_copy["detected_on_side"] = side_num
+                    f_copy["side_label"] = f"Side {side_num}"
+                    merged_fields[field_name] = f_copy
+
+        side_summaries.append({
+            "side_number": side_num,
+            "filename": side_name,
+            "scan_id": side.get("scan_id"),
+            "fields_found": [k for k, v in side_fields.items() if v and v.get("value")],
+            "violations_found": len(side.get("violations", [])),
+        })
+
+    # 3. Re-evaluate compliance on the consolidated fields
+    synthetic_extraction = {
+        "fields": merged_fields,
+        "summary": {
+            "total_fields_detected": len(merged_fields),
+            "mandatory_fields_present": [k for k, v in merged_fields.items() if v.get("value")],
+        }
+    }
+
+    net_qty_val = None
+    if "net_quantity" in merged_fields:
+        try:
+            nq_str = str(merged_fields["net_quantity"].get("value", ""))
+            m = re.search(r"(\d+(?:\.\d+)?)", nq_str)
+            if m:
+                net_qty_val = float(m.group(1))
+        except Exception:
+            pass
+
+    re_evaluated = evaluate_compliance(
+        extraction_result=synthetic_extraction,
+        net_quantity_g=net_qty_val or primary.get("net_quantity_g"),
+        package_width_mm=primary.get("package_width_mm"),
+    )
+
+    # 4. Construct unified multi-side result
+    unified_result = dict(primary)
+    unified_result["scan_type"] = "multi_side"
+    unified_result["product_name"] = best_product_name or primary.get("product_name") or "Multi-Side Packaged Product"
+    unified_result["gtin"] = best_gtin or primary.get("gtin")
+    unified_result["barcodes"] = all_barcodes or primary.get("barcodes", [])
+    unified_result["fields"] = merged_fields
+    unified_result["compliance_status"] = re_evaluated["compliance_status"]
+    unified_result["violations_count"] = len(re_evaluated["violations"])
+    unified_result["violations"] = re_evaluated["violations"]
+    unified_result["sides_analyzed"] = len(side_results)
+    unified_result["side_breakdown"] = side_summaries
+    unified_result["all_image_urls"] = all_raw_urls
+    unified_result["multi_side_summary"] = (
+        f"Consolidated analysis of {len(side_results)} sides. "
+        f"Detected {len(merged_fields)} declarations. "
+        f"Status: {re_evaluated['compliance_status'].upper()} ({len(re_evaluated['violations'])} violations)."
+    )
+
+    return unified_result
+
+
 @router.post("/scans/batch", summary="Batch Process Product Label Scans")
 @router.post("/scan/batch", summary="Batch Process Product Label Scans (Files or Queue)")
 async def batch_scan_images(
@@ -1738,6 +1853,8 @@ async def batch_scan_images(
     """
     Batch process uploaded product label images synchronously.
     Supports Inspector, Admin, and Citizen role submissions.
+    When scan_type is 'multi_side', multiple angles of the SAME product are processed
+    concurrently via asyncio.gather and merged into a single consolidated compliance verdict.
     """
     if not files:
         raise HTTPException(
@@ -1763,39 +1880,59 @@ async def batch_scan_images(
         len(files), scan_type, effective_role, claimed_violation_type,
     )
 
-    results = []
+    # ── High-Speed Concurrent Ingestion ──────────────────────────────────────
+    file_payloads = []
     errors = []
-
-    for file in files:
+    for idx, file in enumerate(files):
         try:
             content = await file.read()
-            res = await _process_single_scan_image(
-                image_bytes=content,
-                filename=file.filename or "image.jpg",
-                scan_type_str=scan_type,
-                source_url=source_url,
-                category=category,
-                package_width_mm=package_width_mm,
-                net_quantity_g=net_quantity_g,
-                db=db,
-                ar_pixels_per_mm=ar_pixels_per_mm,
-                claimed_violation_type=claimed_violation_type,
-                submitter_role=effective_role,
-                image_sha256=image_sha256,
-                current_user=current_user,
-            )
+            fname = file.filename or f"side_{idx+1}.jpg"
+            file_payloads.append((content, fname))
+        except Exception as read_err:
+            logger.error("Failed to read uploaded file %s: %s", file.filename, read_err)
+            errors.append({"filename": file.filename, "error": str(read_err)})
+
+    # Execute all OCR & CV pipelines in parallel via asyncio.gather
+    tasks = [
+        _process_single_scan_image(
+            image_bytes=content,
+            filename=fname,
+            scan_type_str="multi_side" if scan_type in ("multi_side", "multi_angle") else scan_type,
+            source_url=source_url,
+            category=category,
+            package_width_mm=package_width_mm,
+            net_quantity_g=net_quantity_g,
+            db=db,
+            ar_pixels_per_mm=ar_pixels_per_mm,
+            claimed_violation_type=claimed_violation_type,
+            submitter_role=effective_role,
+            image_sha256=image_sha256 if len(file_payloads) == 1 else None,
+            current_user=current_user,
+        )
+        for content, fname in file_payloads
+    ]
+    raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    results = []
+    for idx, res in enumerate(raw_results):
+        if isinstance(res, Exception):
+            logger.error("Failed to process batch image %s: %s", file_payloads[idx][1], res)
+            errors.append({"filename": file_payloads[idx][1], "error": str(res)})
+        elif res:
             results.append(res)
-        except HTTPException:
-            raise
-        except Exception as exc:
-            logger.error("Failed to process batch image %s: %s", file.filename, exc)
-            errors.append({"filename": file.filename, "error": str(exc)})
+
+    # If scan_type is multi_side (or multi_angle), consolidate all sides into ONE unified product report!
+    if scan_type in ("multi_side", "multi_angle", "single_product_multi_side") and len(results) > 1:
+        merged_item = _merge_multi_side_scan_results(results)
+        final_results = [merged_item]
+    else:
+        final_results = results
 
     return {
-        "status": "success" if results else "failed",
+        "status": "success" if final_results else "failed",
         "total_processed": len(results),
         "total_failed": len(errors),
-        "results": results,
+        "results": final_results,
         "errors": errors,
     }
 

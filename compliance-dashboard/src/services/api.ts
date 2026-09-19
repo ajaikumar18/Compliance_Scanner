@@ -117,6 +117,33 @@ export async function uploadBatchFiles(
   }
 }
 
+export async function uploadMultiSideScan(
+  files: File[],
+  category = 'Store Inspection'
+): Promise<ScanResult> {
+  const formData = new FormData();
+  files.forEach(file => formData.append('files', file));
+  formData.append('scan_type', 'multi_side');
+  formData.append('category', category);
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 120_000);
+  try {
+    const resp = await fetch(`${API_BASE_URL}/scan/batch`, {
+      method: 'POST',
+      body: formData,
+      signal: controller.signal,
+    });
+    const json = await handleResponse<any>(resp);
+    if (json.results && json.results.length > 0) {
+      return json.results[0];
+    }
+    throw new Error('No consolidated scan result returned for multi-side product');
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export interface EcommerceScanResponse {
   status: string;
   product_title: string;

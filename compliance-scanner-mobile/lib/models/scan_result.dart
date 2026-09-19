@@ -36,6 +36,9 @@ class ScanResult {
   final int? currentXp;
   final String? confirmationMessage;
   final String? reputationTier;
+  final int? sidesAnalyzed;
+  final String? scanType;
+  final String? multiSideSummary;
 
   ScanResult({
     required this.scanId,
@@ -49,6 +52,9 @@ class ScanResult {
     this.currentXp,
     this.confirmationMessage,
     this.reputationTier,
+    this.sidesAnalyzed,
+    this.scanType,
+    this.multiSideSummary,
   });
 
   factory ScanResult.fromJson(Map<String, dynamic> json) {
@@ -75,6 +81,11 @@ class ScanResult {
           : int.tryParse(json['current_xp']?.toString() ?? ''),
       confirmationMessage: json['confirmation_message']?.toString(),
       reputationTier: json['reputation_tier']?.toString(),
+      sidesAnalyzed: json['sides_analyzed'] is int
+          ? json['sides_analyzed']
+          : int.tryParse(json['sides_analyzed']?.toString() ?? ''),
+      scanType: json['scan_type']?.toString(),
+      multiSideSummary: json['multi_side_summary']?.toString(),
     );
   }
 }

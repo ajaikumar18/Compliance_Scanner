@@ -186,10 +186,32 @@ class ResultScreen extends StatelessWidget {
                           Text(
                             'Legal Metrology Rules 2011 & FSSAI Guidelines',
                             style: TextStyle(
-                              color: (isCompliant ? AppColors.emeraldAccent : AppColors.redAccent).withOpacity(0.8),
+                              color: (isCompliant ? AppColors.emeraldAccent : AppColors.redAccent).withValues(alpha: 0.8),
                               fontSize: 11,
                             ),
                           ),
+                          if (scanResult.sidesAnalyzed != null && scanResult.sidesAnalyzed! > 1) ...[
+                            const SizedBox(height: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: Colors.black26,
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(color: Colors.white24),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.flip_camera_android, size: 12, color: Colors.white),
+                                  const SizedBox(width: 5),
+                                  Text(
+                                    'Multi-Side Scan: ${scanResult.sidesAnalyzed} angles verified',
+                                    style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
                         ],
                       ),
                     )
@@ -204,9 +226,32 @@ class ResultScreen extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               Text(
-                'Scan ID #${scanResult.scanId} 窶｢ Category: ${scanResult.productCategory}',
+                'Scan ID #${scanResult.scanId} • Category: ${scanResult.productCategory}',
                 style: const TextStyle(color: AppColors.slate400, fontSize: 12),
               ),
+              if (scanResult.multiSideSummary != null) ...[
+                const SizedBox(height: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: AppColors.slate800,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AppColors.indigoAccent.withValues(alpha: 0.3)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.verified, size: 14, color: AppColors.emeraldAccent),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          scanResult.multiSideSummary!,
+                          style: const TextStyle(color: Colors.white70, fontSize: 11),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 24),
 
               Row(

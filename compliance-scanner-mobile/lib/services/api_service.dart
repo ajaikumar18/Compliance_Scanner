@@ -123,6 +123,48 @@ class ApiService {
   }
 
 
+  // ── Multi-Side Single Product Scan (Front + Back + Flaps Consolidated) ────
+  /// Uploads multiple angles/sides of the SAME product and processes them concurrently
+  /// on the backend, merging all declarations into a single unified ScanResult.
+  static Future<ScanResult> uploadMultiSideScan(
+    List<File> imageFiles, {
+    String category = 'Store Inspection',
+    String submitterRole = 'inspector',
+    String? claimedViolationType,
+  }) async {
+    final request = http.MultipartRequest('POST', Uri.parse('$baseUrl/scan/batch'));
+    for (final file in imageFiles) {
+      request.files.add(await http.MultipartFile.fromPath('files', file.path));
+    }
+    request.fields['scan_type'] = 'multi_side';
+    request.fields['category'] = category;
+    request.fields['submitter_role'] = submitterRole;
+    if (claimedViolationType != null && claimedViolationType.isNotEmpty) {
+      request.fields['claimed_violation_type'] = claimedViolationType;
+    }
+
+    final streamedResp = await request.send().timeout(_kUploadTimeout);
+    final response = await http.Response.fromStream(streamedResp);
+
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      final results = data['results'] as List<dynamic>?;
+      if (results != null && results.isNotEmpty) {
+        return ScanResult.fromJson(results.first as Map<String, dynamic>);
+      }
+      throw Exception('No scan result returned for multi-side product.');
+    }
+
+    String errorMsg = 'Failed to analyze multi-side scan (${response.statusCode})';
+    try {
+      final errBody = jsonDecode(response.body);
+      if (errBody['detail'] != null) {
+        errorMsg = errBody['detail'].toString();
+      }
+    } catch (_) {}
+    throw Exception(errorMsg);
+  }
+
   // ── Batch Image Scan ────────────────────────────────────────────────────────
   static Future<List<ScanResult>> uploadBatchImages(
     List<File> imageFiles, {
