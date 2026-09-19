@@ -1822,6 +1822,34 @@ def _merge_multi_side_scan_results(side_results: list[dict[str, Any]]) -> dict[s
     unified_result["compliance_status"] = re_evaluated["compliance_status"]
     unified_result["violations_count"] = len(re_evaluated["violations"])
     unified_result["violations"] = re_evaluated["violations"]
+    # Build gallery_images for dashboard multi-panel viewing
+    gallery_images = []
+    for idx, side in enumerate(side_results):
+        side_num = idx + 1
+        url = side.get("scanned_image_url") or side.get("image_url")
+        fields_on_this_side = [
+            k for k, v in (side.get("fields") or {}).items()
+            if v and (v.get("value") or v.get("raw_value"))
+        ]
+        label = f"Side {side_num}"
+        if side_num == 1:
+            label = "Side 1 (Front)"
+        elif side_num == 2:
+            label = "Side 2 (Back)"
+        elif side_num == 3:
+            label = "Side 3 (Side/Flap)"
+        else:
+            label = f"Side {side_num} (Panel)"
+        gallery_images.append({
+            "index": idx,
+            "scan_id": side.get("scan_id"),
+            "url": url,
+            "label": label,
+            "fields_detected": fields_on_this_side,
+            "fields_count": len(fields_on_this_side),
+        })
+
+    unified_result["gallery_images"] = gallery_images
     unified_result["sides_analyzed"] = len(side_results)
     unified_result["side_breakdown"] = side_summaries
     unified_result["all_image_urls"] = all_raw_urls

@@ -194,6 +194,12 @@ export const ScanResultPage = ({ scan, onBackToHistory }: ScanResultPageProps) =
                     BATCH: {currentScan.batch_code}
                   </span>
                 )}
+                {(currentScan?.scan_type === 'multi_side' || (currentScan?.sides_analyzed && currentScan.sides_analyzed > 1)) && (
+                  <span className="text-xs px-2.5 py-0.5 rounded-none bg-[#FAF3E6] text-[#B8862B] border border-[#DFBF82] font-mono font-bold flex items-center gap-1.5">
+                    <Layers className="w-3.5 h-3.5 text-[#B8862B]" />
+                    MULTI-SIDE ({currentScan.sides_analyzed || currentScan.gallery_images?.length || 2} SIDES CONSOLIDATED)
+                  </span>
+                )}
               </div>
               <p className="text-xs text-[#5A6E82] mt-1.5 flex flex-wrap items-center gap-2">
                 <span>Category: <strong className="text-[#1C2B3A]">{currentScan?.product_category || 'Packaged Commodities'}</strong></span>
@@ -434,6 +440,35 @@ export const ScanResultPage = ({ scan, onBackToHistory }: ScanResultPageProps) =
         </div>
       )}
 
+      {/* Multi-Side Product Synthesis Dossier Banner */}
+      {currentScan.multi_side_summary && (
+        <div className="p-4 bg-[#FAF3E6] border border-[#DFBF82] text-xs flex items-start gap-3">
+          <Layers className="w-5 h-5 text-[#B8862B] shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-[#B8862B] uppercase tracking-wider font-mono">
+                Consolidated Multi-Side Packaging Audit
+              </span>
+              <span className="text-[10px] font-mono font-bold px-2 py-0.5 bg-white border border-[#DFBF82] text-[#B8862B]">
+                {currentScan.sides_analyzed || currentScan.gallery_images?.length || 2} Sides Analyzed
+              </span>
+            </div>
+            <p className="text-[#1C2B3A] mt-1 leading-relaxed">
+              {currentScan.multi_side_summary}
+            </p>
+            {currentScan.side_breakdown && currentScan.side_breakdown.length > 0 && (
+              <div className="mt-2.5 flex flex-wrap gap-2 pt-2 border-t border-[#DFBF82]/60">
+                {currentScan.side_breakdown.map((sb, sIdx) => (
+                  <span key={sIdx} className="text-[11px] font-mono px-2 py-0.5 bg-white border border-[#DFBF82] text-[#1C2B3A]">
+                    <strong>Side {sb.side_number}:</strong> {sb.fields_found.length} declarations ({sb.violations_found} violations)
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* ───────────────────────────────────────────────────────────── */}
       {/* E-COMMERCE VS PACKAGING CROSS-VALIDATION TABLE (Rule 6(10))   */}
       {/* ───────────────────────────────────────────────────────────── */}
@@ -581,6 +616,11 @@ export const ScanResultPage = ({ scan, onBackToHistory }: ScanResultPageProps) =
                         <span className="text-sm font-serif font-bold text-[#1C2B3A]">
                           {decl.label}
                         </span>
+                        {fieldInfo?.detected_on_side && (
+                          <span className="text-[10px] font-mono px-1.5 py-0.5 bg-[#FAF3E6] border border-[#DFBF82] text-[#B8862B] font-bold" title={`Detected on packaging side ${fieldInfo.detected_on_side}`}>
+                            Side {fieldInfo.detected_on_side}
+                          </span>
+                        )}
                       </div>
                       <span className="text-[11px] font-mono text-[#5A6E82]">
                         Mandated by {decl.rule}

@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { UploadCloud, FolderUp, Globe, FileImage, CheckCircle, Loader2, Play, Smartphone, Sparkles, Download } from 'lucide-react';
+import { UploadCloud, FolderUp, Globe, FileImage, CheckCircle, Loader2, Play, Smartphone, Sparkles, Download, Layers, X, Plus } from 'lucide-react';
 import {
   queueEcommerceCategoryScan,
   uploadBatchFiles,
   uploadSingleScan,
+  uploadMultiSideScan,
   scanEcommerceProduct,
   scanEcommerceCategory,
   downloadBatchReport,
@@ -18,7 +19,13 @@ interface UploadPageProps {
 }
 
 export const UploadPage = ({ onScanCompleted, onBatchQueued, onBatchCompleted }: UploadPageProps) => {
-  const [activeTab, setActiveTab] = useState<'single' | 'batch' | 'ecommerce'>('single');
+  const [activeTab, setActiveTab] = useState<'single' | 'multi_side' | 'batch' | 'ecommerce'>('single');
+
+  // Multi-Side Product State (Front + Back + Flaps)
+  const [multiFiles, setMultiFiles] = useState<File[]>([]);
+  const [multiPreviews, setMultiPreviews] = useState<string[]>([]);
+  const [loadingMulti, setLoadingMulti] = useState(false);
+  const [multiCategory, setMultiCategory] = useState('Packaged Foods');
 
   // Single Upload State
   const [singleFile, setSingleFile] = useState<File | null>(null);
@@ -98,6 +105,49 @@ export const UploadPage = ({ onScanCompleted, onBatchQueued, onBatchCompleted }:
       setError(err.message || 'Failed to scan image.');
     } finally {
       setLoadingSingle(false);
+    }
+  };
+
+  // Handle multi-side file drop
+  const handleMultiFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      const addedFiles = Array.from(e.target.files);
+      const combined = [...multiFiles, ...addedFiles];
+      setMultiFiles(combined);
+      const newPreviews = addedFiles.map(f => URL.createObjectURL(f));
+      setMultiPreviews(prev => [...prev, ...newPreviews]);
+      setError(null);
+      setSuccessMsg(null);
+    }
+  };
+
+  const removeMultiFile = (idx: number) => {
+    if (multiPreviews[idx]) {
+      URL.revokeObjectURL(multiPreviews[idx]);
+    }
+    setMultiFiles(prev => prev.filter((_, i) => i !== idx));
+    setMultiPreviews(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  const handleMultiSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (multiFiles.length < 2) {
+      setError('Please upload at least 2 packaging images (e.g. Front & Back panels) of the same product.');
+      return;
+    }
+
+    setLoadingMulti(true);
+    setError(null);
+    try {
+      const res = await uploadMultiSideScan(multiFiles, multiCategory);
+      if (multiPreviews.length > 0) {
+        res.scanned_image_url = multiPreviews[0];
+      }
+      onScanCompleted(res);
+    } catch (err: any) {
+      setError(err.message || 'Failed to scan multi-side product.');
+    } finally {
+      setLoadingMulti(false);
     }
   };
 
@@ -233,6 +283,18 @@ export const UploadPage = ({ onScanCompleted, onBatchQueued, onBatchCompleted }:
           >
             <UploadCloud className="w-4 h-4" />
             Single Specimen Scan
+          </button>
+
+          <button
+            onClick={() => setActiveTab('multi_side')}
+            className={`flex items-center gap-2 px-5 py-2 text-xs font-semibold tracking-wide transition-all ${
+              activeTab === 'multi_side'
+                ? 'bg-[#1C2B3A] text-white'
+                : 'text-[#5A6E82] hover:text-[#1C2B3A] hover:bg-[#F7F5F0]'
+            }`}
+          >
+            <Layers className="w-4 h-4 text-[#DFBF82]" />
+            Multi-Side Product (Front + Back)
           </button>
 
           <button
@@ -375,6 +437,180 @@ export const UploadPage = ({ onScanCompleted, onBatchQueued, onBatchCompleted }:
           >
             {loadingSingle ? <Loader2 className="w-5 h-5 animate-spin" /> : <Play className="w-5 h-5 fill-current" />}
             {loadingSingle ? 'Executing Statutory OCR & Calibration Analysis...' : 'Submit Specimen for Compliance Audit'}
+          </button>
+        </form>
+      )}
+
+      {/* Tab: Multi-Side Product Evidence Synthesizer */}
+      {activeTab === 'multi_side' && (
+        <form onSubmit={handleMultiSubmit} className="bg-white border border-[#D8D2C6] p-6 sm:p-8 space-y-6">
+          {/* Informational Guidance Header */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-[#FAF3E6] border border-[#DFBF82] gap-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-white border border-[#DFBF82] text-[#B8862B] shrink-0">
+                <Layers className="w-5 h-5 text-[#B8862B]" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-serif font-bold text-[#1C2B3A]">Single-Product Multi-Side Evidence Synthesizer</h3>
+                  <span className="px-2 py-0.5 text-[10px] font-mono font-bold uppercase bg-white border border-[#DFBF82] text-[#B8862B]">
+                    Multi-Angle Fusion
+                  </span>
+                </div>
+                <p className="text-xs text-[#5A6E82] mt-0.5">
+                  Upload multiple sides/panels of the <strong>same product</strong> (e.g. Front Brand face + Back Legal Metrology panel + Top/Bottom flaps). All panels are analyzed in parallel and synthesized into a consolidated audit report.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Upload Drop Zone & Thumbnails */}
+          <div className="space-y-4">
+            <div className="border-2 border-dashed border-[#D8D2C6] hover:border-[#1C2B3A] p-6 text-center transition-colors relative cursor-pointer bg-[#F7F5F0]">
+              <input
+                type="file"
+                multiple
+                accept="image/*"
+                onChange={handleMultiFileChange}
+                className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-10"
+              />
+              <div className="space-y-2">
+                <div className="w-12 h-12 bg-white border border-[#D8D2C6] text-[#1C2B3A] flex items-center justify-center mx-auto">
+                  <Layers className="w-6 h-6 text-[#1C2B3A]" />
+                </div>
+                <div>
+                  <p className="text-sm font-serif font-bold text-[#1C2B3A]">
+                    {multiFiles.length > 0 ? 'Add More Product Panels / Angles' : 'Select or Drop Packaging Sides (Front, Back, Flap)'}
+                  </p>
+                  <p className="text-xs text-[#5A6E82] mt-1">
+                    Select 2 or more photos belonging to the same product packaging (PNG, JPG, WEBP)
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Thumbnail Grid */}
+            {multiFiles.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs font-mono text-[#5A6E82]">
+                  <span>Uploaded Panels: <strong className="text-[#1C2B3A]">{multiFiles.length} faces ready for synthesis</strong></span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      multiPreviews.forEach(url => URL.revokeObjectURL(url));
+                      setMultiFiles([]);
+                      setMultiPreviews([]);
+                    }}
+                    className="text-[#A8342A] hover:underline"
+                  >
+                    Clear All
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                  {multiFiles.map((file, idx) => (
+                    <div
+                      key={idx}
+                      className="relative border border-[#D8D2C6] bg-white p-2 flex flex-col group hover:border-[#1C2B3A] transition"
+                    >
+                      {/* Side Label Badge */}
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-[10px] font-mono font-bold uppercase px-1.5 py-0.5 bg-[#1C2B3A] text-white">
+                          {idx === 0 ? 'Side 1 (Front)' : idx === 1 ? 'Side 2 (Back)' : idx === 2 ? 'Side 3 (Flap)' : `Side ${idx + 1}`}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => removeMultiFile(idx)}
+                          className="w-5 h-5 flex items-center justify-center bg-[#F9EBE9] hover:bg-[#A8342A] text-[#A8342A] hover:text-white transition rounded-none"
+                          title="Remove Panel"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
+                      {/* Image Thumbnail */}
+                      <div className="w-full h-28 bg-[#F7F5F0] border border-[#E2DDD5] flex items-center justify-center overflow-hidden mb-2">
+                        {multiPreviews[idx] ? (
+                          <img
+                            src={multiPreviews[idx]}
+                            alt={`Side ${idx + 1}`}
+                            className="w-full h-full object-contain"
+                          />
+                        ) : (
+                          <FileImage className="w-6 h-6 text-[#8C9BAE]" />
+                        )}
+                      </div>
+
+                      {/* File Metadata */}
+                      <div className="text-[11px] font-mono text-[#5A6E82] truncate" title={file.name}>
+                        {file.name}
+                      </div>
+                      <div className="text-[10px] font-mono text-[#8C9BAE]">
+                        {(file.size / 1024).toFixed(0)} KB
+                      </div>
+                    </div>
+                  ))}
+
+                  {/* Add More Tile */}
+                  <label className="relative border-2 border-dashed border-[#D8D2C6] hover:border-[#1C2B3A] bg-[#FAF8F5] p-2 flex flex-col items-center justify-center h-44 cursor-pointer transition">
+                    <input
+                      type="file"
+                      multiple
+                      accept="image/*"
+                      onChange={handleMultiFileChange}
+                      className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                    />
+                    <div className="w-8 h-8 bg-white border border-[#D8D2C6] flex items-center justify-center mb-2">
+                      <Plus className="w-4 h-4 text-[#1C2B3A]" />
+                    </div>
+                    <span className="text-xs font-serif font-bold text-[#1C2B3A]">Add Another Side</span>
+                    <span className="text-[10px] text-[#5A6E82] mt-0.5">Top, bottom, or flap</span>
+                  </label>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Form Options */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-mono uppercase font-semibold text-[#1C2B3A] mb-2">
+                Commodity Category
+              </label>
+              <input
+                type="text"
+                value={multiCategory}
+                onChange={e => setMultiCategory(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-white border border-[#D8D2C6] text-[#1C2B3A] text-sm focus:outline-none focus:border-[#1C2B3A]"
+                placeholder="e.g. Packaged Foods, Cosmetics, Beverages"
+              />
+            </div>
+            <div className="flex flex-col justify-end">
+              <div className="p-2.5 bg-[#F7F5F0] border border-[#D8D2C6] text-[11px] text-[#5A6E82] font-mono flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-[#B8862B] shrink-0" />
+                <span>
+                  High-speed parallel OCR runs concurrently across all {multiFiles.length || 0} panel photos for near-instant verdict generation.
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Submit Button */}
+          <button
+            type="submit"
+            disabled={multiFiles.length < 2 || loadingMulti}
+            className="w-full py-3.5 px-6 bg-[#1C2B3A] hover:bg-[#2A3F55] text-white font-semibold text-sm border border-[#1C2B3A] transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+          >
+            {loadingMulti ? (
+              <Loader2 className="w-5 h-5 animate-spin" />
+            ) : (
+              <Play className="w-5 h-5 fill-current" />
+            )}
+            {loadingMulti
+              ? `Synthesizing ${multiFiles.length} Panels Concurrently...`
+              : multiFiles.length < 2
+              ? 'Upload at Least 2 Sides to Begin Multi-Panel Audit'
+              : `Synthesize & Audit Multi-Side Product (${multiFiles.length} Panels)`}
           </button>
         </form>
       )}

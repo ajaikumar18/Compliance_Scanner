@@ -34,6 +34,7 @@ export interface FieldExtraction {
   detected_on_image?: string | null;
   detected_on_index?: number | null;
   detected_on_label?: string | null;
+  detected_on_side?: string | null;
   detected_scan_id?: number | null;
   packaging_ocr_value?: string | null;
 }
@@ -180,6 +181,16 @@ export interface ScanResult {
     method_breakdown?: Record<string, number>;
     total_panels_scanned?: number;
   };
+  // Multi-Side Packaging Intelligence
+  sides_analyzed?: number;
+  multi_side_summary?: string;
+  side_breakdown?: Array<{
+    side_index: number;
+    side_label: string;
+    fields_detected: string[];
+    fields_count: number;
+  }>;
+  all_image_urls?: string[];
   // AI Product Intelligence Layers
   qr_code?: QRCodeData;
   verification_id?: string;
