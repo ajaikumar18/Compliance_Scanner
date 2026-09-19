@@ -44,13 +44,17 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  @override
-  void initState() {
-    super.initState();
-    // Check server connectivity on open
+  void _checkServerConnectivity() {
+    if (mounted) setState(() => _isServerReachable = null);
     ApiService.ping().then((reachable) {
       if (mounted) setState(() => _isServerReachable = reachable);
     });
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _checkServerConnectivity();
   }
 
   @override
@@ -117,12 +121,13 @@ class _LoginScreenState extends State<LoginScreen> {
               final newUrl = controller.text.trim();
               if (newUrl.isNotEmpty) {
                 ApiService.setBaseUrl(newUrl);
-                setState(() {});
                 Navigator.pop(ctx);
+                _checkServerConnectivity();
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text('Server set to: $newUrl'),
+                    content: Text('Testing connection to: $newUrl...'),
                     backgroundColor: const Color(0xFF2F6F4E),
+                    duration: const Duration(seconds: 2),
                   ),
                 );
               }
@@ -143,44 +148,47 @@ class _LoginScreenState extends State<LoginScreen> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         actions: [
-          // Connection status indicator
-          Padding(
-            padding: const EdgeInsets.only(right: 4),
-            child: Center(
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  AnimatedContainer(
-                    duration: const Duration(milliseconds: 400),
-                    width: 8,
-                    height: 8,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: _isServerReachable == null
-                          ? Colors.grey
-                          : _isServerReachable!
-                              ? AppColors.emeraldAccent
-                              : Colors.redAccent,
+          // Connection status indicator (tap to recheck)
+          GestureDetector(
+            onTap: _checkServerConnectivity,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+              child: Center(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 400),
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: _isServerReachable == null
+                            ? Colors.grey
+                            : _isServerReachable!
+                                ? AppColors.emeraldAccent
+                                : Colors.redAccent,
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    _isServerReachable == null
-                        ? 'Checking...'
-                        : _isServerReachable!
-                            ? 'Online'
-                            : 'Offline',
-                    style: TextStyle(
-                      color: _isServerReachable == null
-                          ? Colors.grey
+                    const SizedBox(width: 5),
+                    Text(
+                      _isServerReachable == null
+                          ? 'Checking...'
                           : _isServerReachable!
-                              ? AppColors.emeraldAccent
-                              : Colors.redAccent,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
+                              ? 'Online'
+                              : 'Offline (tap)',
+                      style: TextStyle(
+                        color: _isServerReachable == null
+                            ? Colors.grey
+                            : _isServerReachable!
+                                ? AppColors.emeraldAccent
+                                : Colors.redAccent,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
